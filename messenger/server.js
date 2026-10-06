@@ -1,76 +1,68 @@
-const http = require("http"), fs = require("fs"), path = require("path"), crypto = require("crypto");
+const http = require("http"), fs = require("fs"), path = require("path");
 const { WebSocketServer } = require("ws");
+const webpush = require("web-push");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, "public");
-const DATA_DIR = process.env.DATA_DIR || __dirname;
-const DB_FILE = path.join(DATA_DIR, "data.json");
-const UPLOADS = path.join(DATA_DIR, "uploads");
-fs.mkdirSync(UPLOADS, { recursive: true });
+const DB_FILE = path.join(__dirname, "data.json");
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const MAX_BYTES = (Number(process.env.MAX_UPLOAD_MB) || 25) * 1024 * 1024;
+const STORY_TTL_MS = (Number(process.env.STORY_TTL_HOURS) || 24) * 3600 * 1000;
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // ---------- tiny JSON "database" ----------
 let loaded = {};
 try { loaded = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch {}
-const db = {
-  users: loaded.users || [],
-  messages: loaded.messages || [],
-  friends: loaded.friends || null,
-  requests: loaded.requests || [],
-  profiles: Object.assign(Object.create(null), loaded.profiles || {}),
-};
+const db = { users: loaded.users || [], messages: loaded.messages || [], friends: loaded.friends || null,
+             requests: loaded.requests || [], files: loaded.files || {}, stories: loaded.stories || [], push: loaded.push || {} };
+const NAME_RE = /^[A-Za-z0-9]{1,20}$/; // usernames: letters and numbers only
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-const sha = s => crypto.createHash("sha256").update(s).digest("hex");
 db.messages.forEach(m => { if (!m.id) m.id = rid(); });
 const isFriend = (a, b) => (db.friends || []).some(([x, y]) => (x === a && y === b) || (x === b && y === a));
-if (!db.friends) { // very old data: people who already chatted become friends
+if (!db.friends) { // older data: people who already chatted become friends
   db.friends = [];
   db.messages.forEach(m => { if (m.from !== m.to && !isFriend(m.from, m.to)) db.friends.push([m.from, m.to]); });
 }
-// accounts made before profiles existed get an empty profile (no password yet: claimed on first login)
-db.users.forEach(n => { if (!db.profiles[n]) db.profiles[n] = { display: n, bio: "", av: 0, pass: null, tokens: [], lastSeen: 0 }; });
-
 const friendsOf = n => db.friends.filter(p => p.includes(n)).map(p => (p[0] === n ? p[1] : p[0]));
 const hasReq = (a, b) => db.requests.some(r => r.from === a && r.to === b);
 const dropReq = (a, b) => { db.requests = db.requests.filter(r => !(r.from === a && r.to === b)); };
-const findUser = raw => {
-  const n = String(raw || "").trim(); if (!n) return null;
-  if (db.profiles[n]) return n;
-  const l = n.toLowerCase();
-  return db.users.find(u => u.toLowerCase() === l) || null;
-};
 let timer;
 const save = () => { clearTimeout(timer); timer = setTimeout(() => fs.writeFile(DB_FILE, JSON.stringify(db), () => {}), 200); };
 
-// ---------- passwords, sessions, rate limits ----------
-const scrypt = (pw, salt) => new Promise((res, rej) => crypto.scrypt(pw, salt, 64, (e, k) => (e ? rej(e) : res(k))));
-async function makePass(pw) { const salt = crypto.randomBytes(16); return { salt: salt.toString("hex"), hash: (await scrypt(pw, salt)).toString("hex") }; }
-async function checkPass(p, pw) {
-  if (!p) return false;
-  const k = await scrypt(pw, Buffer.from(p.salt, "hex")), h = Buffer.from(p.hash, "hex");
-  return h.length === k.length && crypto.timingSafeEqual(h, k);
+// ---------- web push (call notifications when the app is closed) ----------
+let vapid = { publicKey: process.env.VAPID_PUBLIC_KEY, privateKey: process.env.VAPID_PRIVATE_KEY };
+if (!vapid.publicKey || !vapid.privateKey) {
+  const vf = path.join(__dirname, "vapid.json");
+  try { vapid = JSON.parse(fs.readFileSync(vf, "utf8")); }
+  catch { vapid = webpush.generateVAPIDKeys(); try { fs.writeFileSync(vf, JSON.stringify(vapid)); } catch {} }
 }
-function newToken(n) {
-  const t = crypto.randomBytes(32).toString("hex"), p = db.profiles[n];
-  p.tokens = [sha(t), ...(p.tokens || [])].slice(0, 8); save(); return t;
+webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@example.com", vapid.publicKey, vapid.privateKey);
+const pendingCalls = new Map(); // callee -> { from, offer, ice[], at }  (calls waiting for an offline friend)
+const RING_MS = 60000;
+function sendPush(user, payload) {
+  (db.push[user] || []).slice().forEach(sub => {
+    if (process.env.PUSH_DRY_RUN) return console.log("PUSH_DRY " + JSON.stringify({ user, endpoint: sub.endpoint, payload }));
+    webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 60, urgency: "high" }).catch(err => {
+      if (err && (err.statusCode === 404 || err.statusCode === 410)) { db.push[user] = (db.push[user] || []).filter(x => x.endpoint !== sub.endpoint); save(); }
+    });
+  });
 }
-const fails = new Map(), signups = new Map();
-const locked = k => { const f = fails.get(k); return f && f.until > Date.now(); };
-const noteFail = k => { const f = fails.get(k) || { n: 0, until: 0 }; if (++f.n >= 6) { f.n = 0; f.until = Date.now() + 60000; } fails.set(k, f); };
-setInterval(() => { const now = Date.now(); fails.forEach((f, k) => { if (f.until < now && !f.n) fails.delete(k); }); signups.forEach((v, k) => { if (v.t < now) signups.delete(k); }); }, 600000).unref();
 
-// ---------- image uploads (avatars + photo messages) ----------
-const MAGIC = b => (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF ? "image/jpeg"
-  : b.length > 4 && b.readUInt32BE(0) === 0x89504E47 ? "image/png"
-  : b.length > 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP" ? "image/webp" : null);
-function parseImage(s, max) {
-  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(s || ""));
-  if (!m || m[1].length > max * 1.4) return null;
-  const buf = Buffer.from(m[1], "base64");
-  return buf.length && buf.length <= max && MAGIC(buf) ? buf : null;
+// ---------- uploaded files & stories ----------
+const tokens = new Map(); // session token -> username
+const kindOf = mime => /^image\/(png|jpe?g|gif|webp)$/.test(mime) ? "image" : /^video\/(mp4|webm|ogg|quicktime)$/.test(mime) ? "video" : "file";
+const removeFile = id => { delete db.files[id]; fs.unlink(path.join(UPLOAD_DIR, id), () => {}); };
+function activeStories() { // also lazily deletes expired stories and their files
+  const cut = Date.now() - STORY_TTL_MS, dead = db.stories.filter(s => s.at < cut);
+  if (dead.length) { dead.forEach(s => s.file && removeFile(s.file.id)); db.stories = db.stories.filter(s => s.at >= cut); save(); }
+  return db.stories;
 }
-const avFile = n => path.join(UPLOADS, "av-" + crypto.createHash("sha1").update(n).digest("hex"));
-const imFile = id => path.join(UPLOADS, "im-" + id);
-const rm = f => fs.unlink(f, () => {});
+function canAccess(user, id) {
+  const f = db.files[id]; if (!f) return false;
+  return f.owner === user
+    || db.messages.some(m => m.file && m.file.id === id && (m.from === user || m.to === user))
+    || activeStories().some(s => s.file && s.file.id === id && (s.user === user || isFriend(s.user, user)));
+}
 
 // ---------- ICE servers for video calls (optional TURN via env vars) ----------
 function iceConfig() {
@@ -82,154 +74,146 @@ function iceConfig() {
   return list;
 }
 
-// ---------- HTTP: static files, avatars, photos ----------
-const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml" };
-function sendImage(res, file, cache) {
-  fs.readFile(file, (err, data) => {
-    const type = !err && MAGIC(data);
-    if (!type) return res.writeHead(404).end();
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": cache, "X-Content-Type-Options": "nosniff" });
-    res.end(data);
-  });
-}
+// ---------- HTTP: static files, uploads, protected downloads ----------
+const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml" };
 const server = http.createServer((req, res) => {
-  let url; try { url = decodeURIComponent(req.url.split("?")[0]); } catch { return res.writeHead(400).end(); }
+  const u = new URL(req.url, "http://x"), url = u.pathname, q = u.searchParams;
   if (url === "/ice-config") { res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }); return res.end(JSON.stringify(iceConfig())); }
   if (url === "/health") return res.writeHead(200).end("ok");
-  if (url.startsWith("/avatar/")) { const n = findUser(url.slice(8)); return n && db.profiles[n].av ? sendImage(res, avFile(n), "public, max-age=31536000, immutable") : res.writeHead(404).end(); }
-  if (url.startsWith("/img/")) { const id = url.slice(5); return /^[a-f0-9]{24}$/.test(id) ? sendImage(res, imFile(id), "private, max-age=86400") : res.writeHead(404).end(); }
+  if (url === "/push-key") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ key: vapid.publicKey })); }
+
+  if (req.method === "POST" && url === "/upload") {
+    const user = tokens.get(q.get("token"));
+    if (!user) return res.writeHead(401).end("Not signed in");
+    if (Number(req.headers["content-length"] || 0) > MAX_BYTES) return res.writeHead(413).end("Too large");
+    const id = rid() + rid(), fp = path.join(UPLOAD_DIR, id), out = fs.createWriteStream(fp);
+    let size = 0, aborted = false;
+    req.on("data", c => {
+      size += c.length;
+      if (size > MAX_BYTES && !aborted) { aborted = true; out.destroy(); fs.unlink(fp, () => {}); res.writeHead(413).end("Too large"); req.destroy(); }
+    });
+    req.pipe(out);
+    out.on("finish", () => {
+      if (aborted) return;
+      if (!size) { fs.unlink(fp, () => {}); return res.writeHead(400).end("Empty file"); }
+      const name = String(q.get("name") || "file").replace(/[\\/\r\n"<>]/g, "_").slice(0, 100) || "file";
+      const mime = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase(), kind = kindOf(mime);
+      db.files[id] = { owner: user, name, kind, size, mime: kind === "file" ? "application/octet-stream" : mime, at: Date.now(), used: false };
+      save(); res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ id, name, kind, size }));
+    });
+    return;
+  }
+
+  const fm = url.match(/^\/files\/([a-z0-9]+)$/);
+  if (fm) {
+    const user = tokens.get(q.get("token")), f = db.files[fm[1]];
+    if (!user || !f || !canAccess(user, fm[1])) return res.writeHead(404).end("Not found");
+    const fp = path.join(UPLOAD_DIR, fm[1]);
+    return fs.stat(fp, (err, st) => {
+      if (err) return res.writeHead(404).end("Not found");
+      const h = { "Content-Type": f.mime, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+                  "Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes" };
+      if (f.kind === "file") h["Content-Disposition"] = `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`;
+      const r = req.headers.range && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+      if (!r) { res.writeHead(200, { ...h, "Content-Length": st.size }); return fs.createReadStream(fp).pipe(res); }
+      let s = r[1] ? +r[1] : 0, e = r[2] ? +r[2] : st.size - 1;
+      if (!r[1] && r[2]) { s = Math.max(0, st.size - +r[2]); e = st.size - 1; }
+      e = Math.min(e, st.size - 1);
+      if (s > e || s >= st.size) { res.writeHead(416, { "Content-Range": `bytes */${st.size}` }); return res.end(); }
+      res.writeHead(206, { ...h, "Content-Range": `bytes ${s}-${e}/${st.size}`, "Content-Length": e - s + 1 });
+      fs.createReadStream(fp, { start: s, end: e }).pipe(res);
+    });
+  }
+
   const file = path.join(PUBLIC, path.normalize(url === "/" ? "/index.html" : url));
-  if (!file.startsWith(PUBLIC + path.sep)) return res.writeHead(403).end();
+  if (!file.startsWith(PUBLIC)) return res.writeHead(403).end();
   fs.readFile(file, (err, data) => {
     if (err) return res.writeHead(404).end("Not found");
-    res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "X-Content-Type-Options": "nosniff" });
+    res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
     res.end(data);
   });
 });
 
 // ---------- realtime ----------
-const wss = new WebSocketServer({ server, maxPayload: 3 * 1024 * 1024 });
+const wss = new WebSocketServer({ server });
 const online = new Map(); // username -> socket
 const send = (ws, obj) => ws.readyState === 1 && ws.send(JSON.stringify(obj));
 const notify = (n, text) => { const s = online.get(n); if (s) send(s, { t: "notice", text }); };
-const mine = n => { const p = db.profiles[n]; return { name: n, display: p.display || n, bio: p.bio || "", av: p.av || 0 }; };
-const card = n => { const p = db.profiles[n]; return Object.assign(mine(n), { online: online.has(n), lastSeen: p.lastSeen || 0 }); };
-const brief = n => { const p = db.profiles[n]; return { name: n, display: p.display || n, av: p.av || 0 }; };
 const pushSocial = n => {
-  const s = online.get(n); if (!s || !db.profiles[n]) return;
+  const s = online.get(n); if (!s) return;
   send(s, { t: "social",
-    friends: friendsOf(n).filter(f => db.profiles[f]).map(card),
-    incoming: db.requests.filter(r => r.to === n && db.profiles[r.from]).map(r => brief(r.from)),
-    outgoing: db.requests.filter(r => r.from === n && db.profiles[r.to]).map(r => brief(r.to)) });
+    friends: friendsOf(n).map(f => ({ name: f, online: online.has(f) })),
+    incoming: db.requests.filter(r => r.to === n).map(r => r.from),
+    outgoing: db.requests.filter(r => r.from === n).map(r => r.to),
+    stories: activeStories().filter(x => x.user === n || isFriend(x.user, n)).map(({ id, user, kind, text, at, file }) => ({ id, user, kind, text, at, file })) });
 };
-const related = n => new Set([...friendsOf(n), ...db.requests.filter(r => r.from === n || r.to === n).flatMap(r => [r.from, r.to])].filter(x => x !== n));
-const touch = n => { pushSocial(n); related(n).forEach(pushSocial); };
 function acceptFriend(from, to) {
   dropReq(from, to);
   if (!isFriend(from, to)) db.friends.push([from, to]);
   save();
-  notify(from, `${db.profiles[to].display || to} accepted your friend request.`);
-  notify(to, `You and ${db.profiles[from].display || from} are now friends.`);
+  notify(from, `${to} accepted your friend request.`);
+  notify(to, `You and ${from} are now friends.`);
   pushSocial(from); pushSocial(to);
 }
-function enter(ws, n, token) {
-  const old = online.get(n);
-  if (old && old !== ws) { old.user = null; send(old, { t: "kicked" }); old.close(); }
-  ws.user = n; online.set(n, ws);
-  send(ws, { t: "joined", me: mine(n), token, history: db.messages.filter(m => m.from === n || m.to === n).slice(-500) });
-  pushSocial(n); friendsOf(n).forEach(pushSocial);
-}
-const cleanLine = (s, max) => String(s || "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
+const claimFile = (name, id) => { // attach an uploaded file you own (once)
+  const f = db.files[id];
+  if (!f || f.owner !== name || f.used) return null;
+  f.used = true; return { id, name: f.name, kind: f.kind, size: f.size };
+};
 
-wss.on("connection", (ws, req) => {
-  ws.user = null; ws.busy = false;
-  const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
-  const authErr = (text, extra) => send(ws, Object.assign({ t: "authError", text }, extra));
+setInterval(() => { // expire stories, drop abandoned uploads
+  activeStories();
+  Object.entries(db.files).forEach(([id, f]) => { if (!f.used && f.at < Date.now() - 3600e3) removeFile(id); });
+  save(); online.forEach((_, n) => pushSocial(n));
+}, 10 * 60 * 1000).unref();
 
-  ws.on("message", async raw => {
+wss.on("connection", ws => {
+  let name = null, token = null;
+  ws.on("message", raw => {
     let d; try { d = JSON.parse(raw); } catch { return; }
-    if (!d || typeof d.t !== "string") return;
 
-    // ----- sign up / log in / resume -----
-    if (!ws.user && ["signup", "login", "resume"].includes(d.t)) {
-      if (ws.busy) return;
-      ws.busy = true;
-      try {
-        const pw = String(d.password || "");
-        if (d.t === "signup") {
-          const n = String(d.name || "").trim();
-          if (!/^[A-Za-z0-9_.]{3,20}$/.test(n)) return authErr("Username must be 3-20 letters, numbers, dots or underscores.");
-          if (pw.length < 6 || pw.length > 100) return authErr("Password must be 6-100 characters.");
-          if (findUser(n)) return authErr("That username is taken.");
-          const s = signups.get(ip) || { n: 0, t: Date.now() + 3600000 };
-          if (s.n >= 10) return authErr("Too many new accounts from this network. Try again later.");
-          s.n++; signups.set(ip, s);
-          const pass = await makePass(pw);
-          if (findUser(n)) return authErr("That username is taken.");
-          db.users.push(n);
-          db.profiles[n] = { display: cleanLine(d.display, 30) || n, bio: "", av: 0, pass, tokens: [], lastSeen: Date.now() };
-          return enter(ws, n, newToken(n));
+    if (d.t === "join") {
+      const n = String(d.name || "").trim();
+      if (!NAME_RE.test(n)) return send(ws, { t: "error", text: "Username can only contain letters and numbers (no spaces or symbols), up to 20 characters." });
+      if (online.has(n)) return send(ws, { t: "error", text: "That username is already online." });
+      name = n; online.set(n, ws);
+      token = rid() + rid() + rid(); tokens.set(token, n);
+      if (!db.users.includes(n)) { db.users.push(n); save(); }
+      send(ws, { t: "joined", name: n, token, history: db.messages.filter(m => m.from === n || m.to === n).slice(-500) });
+      pushSocial(n); friendsOf(n).forEach(pushSocial);
+      const call = pendingCalls.get(n);                 // someone rang while you were away
+      if (call) {
+        pendingCalls.delete(n);
+        if (isFriend(call.from, n) && online.has(call.from)) {
+          send(ws, { t: "signal", from: call.from, kind: "offer", data: call.offer });
+          call.ice.forEach(c => send(ws, { t: "signal", from: call.from, kind: "ice", data: c }));
         }
-        if (d.t === "login") {
-          const n = findUser(d.name), key = ip + "|" + String(d.name || "").toLowerCase();
-          if (locked(key)) return authErr("Too many attempts. Wait a minute and try again.");
-          const p = n && db.profiles[n];
-          if (!p) { noteFail(key); return authErr("Wrong username or password."); }
-          if (!p.pass) { // account from before passwords existed: the first password chosen claims it
-            if (pw.length < 6 || pw.length > 100) return authErr("This account has no password yet. Enter a new password (6+ characters) to secure it.");
-            const pass = await makePass(pw);
-            if (p.pass) return authErr("Wrong username or password.");
-            p.pass = pass; save();
-          } else if (!(await checkPass(p.pass, pw))) { noteFail(key); return authErr("Wrong username or password."); }
-          return enter(ws, n, newToken(n));
-        }
-        // resume with a saved session token
-        const n = findUser(d.name), p = n && db.profiles[n];
-        if (!p || !d.token || !(p.tokens || []).includes(sha(String(d.token)))) return authErr("Your session expired. Please log in again.", { expired: true });
-        return enter(ws, n, String(d.token));
-      } finally { ws.busy = false; }
-    }
-    const name = ws.user;
-    if (!name || !db.profiles[name]) return;
-    const p = db.profiles[name];
-
-    // ----- profile -----
-    if (d.t === "profile") {
-      p.display = cleanLine(d.display, 30) || name;
-      p.bio = String(d.bio || "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, 140);
-      save(); send(ws, { t: "me", me: mine(name) }); touch(name);
-    }
-    if (d.t === "avatar") {
-      if (d.data === null) { p.av = 0; rm(avFile(name)); }
-      else {
-        const buf = parseImage(d.data, 400 * 1024);
-        if (!buf) return notify(name, "That picture could not be used. Try a JPG or PNG.");
-        fs.writeFileSync(avFile(name), buf); p.av = Date.now();
       }
-      save(); send(ws, { t: "me", me: mine(name) }); touch(name);
+      return;
     }
-    if (d.t === "password") {
-      const next = String(d.next || "");
-      if (next.length < 6 || next.length > 100) return notify(name, "New password must be 6-100 characters.");
-      if (ws.busy) return; ws.busy = true;
-      try {
-        if (!(await checkPass(p.pass, String(d.old || "")))) return notify(name, "Current password is wrong.");
-        p.pass = await makePass(next); p.tokens = [];
-        send(ws, { t: "passwordChanged", token: newToken(name) });
-      } finally { ws.busy = false; }
+    if (!name) return;
+
+    // ----- push subscriptions (this device wants call notifications) -----
+    if (d.t === "pushSub") {
+      const sb = d.sub;
+      if (sb && typeof sb.endpoint === "string" && /^https:\/\//.test(sb.endpoint) && sb.keys && sb.keys.p256dh && sb.keys.auth) {
+        Object.keys(db.push).forEach(u => { db.push[u] = db.push[u].filter(x => x.endpoint !== sb.endpoint); });
+        db.push[name] = [...(db.push[name] || []), { endpoint: sb.endpoint, keys: { p256dh: String(sb.keys.p256dh), auth: String(sb.keys.auth) } }].slice(-5);
+        save();
+      }
     }
-    if (d.t === "logout") { p.tokens = (p.tokens || []).filter(h => h !== sha(String(d.token || ""))); save(); }
+    if (d.t === "pushUnsub") { db.push[name] = (db.push[name] || []).filter(x => x.endpoint !== String(d.endpoint)); save(); }
 
     // ----- friends -----
     if (d.t === "request") {
-      const to = findUser(d.to);
-      if (!to) return notify(name, `No user named "${cleanLine(d.to, 20)}".`);
+      const to = String(d.to || "").trim();
+      if (!to || !db.users.includes(to)) return notify(name, `No user named "${to}".`);
       if (to === name) return notify(name, "That's you.");
-      if (isFriend(name, to)) return notify(name, `You are already friends with ${db.profiles[to].display}.`);
-      if (hasReq(name, to)) return notify(name, `You already sent ${db.profiles[to].display} a request.`);
-      if (hasReq(to, name)) return acceptFriend(to, name); // they asked first: become friends
+      if (isFriend(name, to)) return notify(name, `You are already friends with ${to}.`);
+      if (hasReq(name, to)) return notify(name, `You already sent ${to} a request.`);
+      if (hasReq(to, name)) return acceptFriend(to, name);
       db.requests.push({ from: name, to }); save();
-      notify(name, `Request sent to ${db.profiles[to].display}.`); notify(to, `${p.display} sent you a friend request.`);
+      notify(name, `Request sent to ${to}.`); notify(to, `${name} sent you a friend request.`);
       pushSocial(name); pushSocial(to);
     }
     if (d.t === "accept" && hasReq(String(d.from), name)) acceptFriend(String(d.from), name);
@@ -237,78 +221,99 @@ wss.on("connection", (ws, req) => {
     if (d.t === "cancel" && hasReq(name, String(d.to))) { dropReq(name, String(d.to)); save(); pushSocial(name); pushSocial(String(d.to)); }
     if (d.t === "unfriend" && isFriend(name, String(d.user))) {
       const u = String(d.user);
-      db.friends = db.friends.filter(q => !(q.includes(name) && q.includes(u))); save();
-      notify(u, `${p.display} removed you from their friends.`);
+      db.friends = db.friends.filter(p => !(p.includes(name) && p.includes(u))); save();
+      notify(u, `${name} removed you from their friends.`);
       pushSocial(name); pushSocial(u);
+    }
+
+    // ----- stories (photo / video / text, visible to friends for 24h) -----
+    if (d.t === "story") {
+      const text = String(d.text || "").trim().slice(0, 300);
+      let file = null;
+      if (d.fileId) {
+        const f = db.files[d.fileId];
+        if (!f || f.kind === "file") return notify(name, "Stories can only be photos or videos.");
+        file = claimFile(name, d.fileId);
+        if (!file) return notify(name, "Upload not found.");
+      }
+      if (!file && !text) return;
+      db.stories.push({ id: rid(), user: name, kind: file ? file.kind : "text", text, file, at: Date.now() }); save();
+      notify(name, "Story posted. Your friends can see it for 24 hours.");
+      pushSocial(name); friendsOf(name).forEach(pushSocial);
+    }
+    if (d.t === "deleteStory") {
+      const i = db.stories.findIndex(s => s.id === d.id && s.user === name);
+      if (i !== -1) { const [s] = db.stories.splice(i, 1); if (s.file) removeFile(s.file.id); save(); pushSocial(name); friendsOf(name).forEach(pushSocial); }
     }
 
     // ----- call setup relay (friends only) -----
     if (d.t === "signal") {
-      const peer = online.get(d.to);
-      if (peer && isFriend(name, d.to)) send(peer, { t: "signal", from: name, kind: d.kind, data: d.data });
-      else if (d.kind === "offer") send(ws, { t: "signal", from: d.to, kind: "unavailable" });
+      const to = String(d.to || ""), peer = online.get(to);
+      if (!isFriend(name, to)) { if (d.kind === "offer") send(ws, { t: "signal", from: to, kind: "unavailable" }); }
+      else if (peer) send(peer, { t: "signal", from: name, kind: d.kind, data: d.data });
+      else if (d.kind === "offer") {                    // friend is offline: ring their phone/browser via push
+        if ((db.push[to] || []).length) {
+          const entry = { from: name, offer: d.data, ice: [], at: Date.now() };
+          pendingCalls.set(to, entry);
+          setTimeout(() => { if (pendingCalls.get(to) === entry) pendingCalls.delete(to); }, RING_MS);
+          sendPush(to, { type: "call", from: name });
+          send(ws, { t: "signal", from: to, kind: "ringing" });
+        } else send(ws, { t: "signal", from: to, kind: "unavailable" });
+      } else {
+        const c = pendingCalls.get(to);
+        if (c && c.from === name) { if (d.kind === "ice") c.ice.push(d.data); else if (d.kind === "hangup") pendingCalls.delete(to); }
+      }
     }
 
-    // ----- typing + read receipts -----
-    if (d.t === "typing") { const peer = online.get(d.to); if (peer && isFriend(name, d.to)) send(peer, { t: "typing", from: name }); }
-    if (d.t === "read") {
-      const from = String(d.from); let upTo = 0;
-      db.messages.forEach(m => { if (m.from === from && m.to === name && !m.seen) { m.seen = Date.now(); upTo = Math.max(upTo, m.at); } });
-      if (upTo) { save(); const s = online.get(from); if (s) send(s, { t: "seen", by: name, upTo }); }
-    }
-
-    // ----- messages -----
+    // ----- messages (text, photo, video, file) -----
     if (d.t === "delete") {
       const i = db.messages.findIndex(x => x.id === d.id && x.from === name);
       if (i !== -1) {
-        const [m] = db.messages.splice(i, 1); if (m.img) rm(imFile(m.img)); save();
+        const [m] = db.messages.splice(i, 1); if (m.file) removeFile(m.file.id); save();
         new Set([m.from, m.to]).forEach(n => { const s = online.get(n); if (s) send(s, { t: "deleted", id: m.id }); });
       }
     }
     if (d.t === "msg") {
       const text = String(d.text || "").trim().slice(0, 2000);
-      const buf = d.img ? parseImage(d.img, 1536 * 1024) : null;
-      if (d.img && !buf) return notify(name, "That photo could not be sent. Try a smaller one.");
-      if ((!text && !buf) || !db.profiles[d.to]) return;
+      if ((!text && !d.fileId) || !db.users.includes(d.to)) return;
       if (!isFriend(name, d.to)) return notify(name, "You can only message friends.");
+      let file = null;
+      if (d.fileId) { file = claimFile(name, d.fileId); if (!file) return notify(name, "Upload not found."); }
       const m = { id: rid(), from: name, to: d.to, text, at: Date.now() };
-      if (buf) { m.img = crypto.randomBytes(12).toString("hex"); fs.writeFileSync(imFile(m.img), buf); }
+      if (file) m.file = file;
       db.messages.push(m);
-      if (db.messages.length > 20000) { const old = db.messages.shift(); if (old.img) rm(imFile(old.img)); }
+      if (db.messages.length > 20000) { const old = db.messages.shift(); if (old.file) removeFile(old.file.id); }
       save();
       send(ws, { t: "msg", m });
       const peer = online.get(d.to);
       if (peer && peer !== ws) send(peer, { t: "msg", m });
     }
 
-    // ----- delete my account (asks for the password) -----
+    // ----- delete my account -----
     if (d.t === "deleteAccount") {
-      if (ws.busy) return; ws.busy = true;
-      try {
-        if (p.pass && !(await checkPass(p.pass, String(d.password || "")))) return notify(name, "Wrong password. Account not deleted.");
-        const gone = name, ex = friendsOf(gone), affected = related(gone);
-        db.messages.forEach(m => { if ((m.from === gone || m.to === gone) && m.img) rm(imFile(m.img)); });
-        rm(avFile(gone));
-        db.users = db.users.filter(u => u !== gone);
-        delete db.profiles[gone];
-        db.messages = db.messages.filter(m => m.from !== gone && m.to !== gone);
-        db.friends = db.friends.filter(q => !q.includes(gone));
-        db.requests = db.requests.filter(r => r.from !== gone && r.to !== gone);
-        save(); online.delete(gone); ws.user = null;
-        send(ws, { t: "accountDeleted" });
-        ex.forEach(f => { const s = online.get(f); if (s) send(s, { t: "userDeleted", name: gone }); });
-        affected.forEach(pushSocial);
-        ws.close();
-      } finally { ws.busy = false; }
+      const gone = name, ex = friendsOf(gone);
+      const affected = new Set([...ex, ...db.requests.filter(r => r.from === gone || r.to === gone).flatMap(r => [r.from, r.to])]);
+      affected.delete(gone);
+      db.messages.filter(m => m.from === gone || m.to === gone).forEach(m => m.file && removeFile(m.file.id));
+      db.stories.filter(s => s.user === gone).forEach(s => s.file && removeFile(s.file.id));
+      Object.entries(db.files).forEach(([id, f]) => { if (f.owner === gone) removeFile(id); });
+      db.stories = db.stories.filter(s => s.user !== gone);
+      db.users = db.users.filter(u => u !== gone);
+      db.messages = db.messages.filter(m => m.from !== gone && m.to !== gone);
+      db.friends = db.friends.filter(p => !p.includes(gone));
+      db.requests = db.requests.filter(r => r.from !== gone && r.to !== gone);
+      delete db.push[gone]; pendingCalls.delete(gone); pendingCalls.forEach((c, k) => { if (c.from === gone) pendingCalls.delete(k); });
+      save(); online.delete(gone); tokens.delete(token); name = null;
+      send(ws, { t: "accountDeleted" });
+      ex.forEach(f => { const s = online.get(f); if (s) send(s, { t: "userDeleted", name: gone }); });
+      affected.forEach(pushSocial);
+      ws.close();
     }
   });
   ws.on("close", () => {
-    const n = ws.user;
-    if (n && online.get(n) === ws) {
-      online.delete(n);
-      if (db.profiles[n]) { db.profiles[n].lastSeen = Date.now(); save(); }
-      friendsOf(n).forEach(pushSocial);
-    }
+    if (token) tokens.delete(token);
+    if (name) pendingCalls.forEach((c, k) => { if (c.from === name) pendingCalls.delete(k); });
+    if (name && online.get(name) === ws) { online.delete(name); friendsOf(name).forEach(pushSocial); }
   });
 });
 
