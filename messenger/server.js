@@ -10,19 +10,11 @@ const MAX_BYTES = (Number(process.env.MAX_UPLOAD_MB) || 25) * 1024 * 1024;
 const STORY_TTL_MS = (Number(process.env.STORY_TTL_HOURS) || 24) * 3600 * 1000;
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ---------- the one admin account ----------
-// There is exactly one admin, fixed by the server operator via an env var (not by
-// any action a user can take in the app). Whoever signs in with this exact
-// username gets admin powers; nobody can grant themselves or anyone else admin.
-const ADMIN_NAME = String(process.env.ADMIN_USERNAME || "").trim();
-const isAdmin = n => !!ADMIN_NAME && n === ADMIN_NAME;
-
 // ---------- tiny JSON "database" ----------
 let loaded = {};
 try { loaded = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch {}
 const db = { users: loaded.users || [], messages: loaded.messages || [], friends: loaded.friends || null,
-             requests: loaded.requests || [], files: loaded.files || {}, stories: loaded.stories || [], push: loaded.push || {},
-             bans: loaded.bans || [], reports: loaded.reports || [], adminGrants: loaded.adminGrants || {} };
+             requests: loaded.requests || [], files: loaded.files || {}, stories: loaded.stories || [], push: loaded.push || {} };
 const NAME_RE = /^[A-Za-z0-9]{1,20}$/; // usernames: letters and numbers only
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 db.messages.forEach(m => { if (!m.id) m.id = rid(); });
@@ -169,32 +161,6 @@ const claimFile = (name, id) => { // attach an uploaded file you own (once)
   f.used = true; return { id, name: f.name, kind: f.kind, size: f.size };
 };
 
-// ---------- admin: presence/moderation dashboard, call activity, broadcasts ----------
-// Everything here is read-only about video (the server only ever relays WebRTC
-// signaling, never media) except the opt-in admin-call bypass and user-started
-// broadcasts, both described below.
-const activeCalls = new Map(); // "a|b" -> { a, b, state: "ringing"|"connected", since }
-const liveBroadcasts = new Map(); // broadcaster username -> since (viewer is always the admin)
-const callKey = (a, b) => [a, b].sort().join("|");
-function trackCallStart(a, b) { activeCalls.set(callKey(a, b), { a, b, state: "ringing", since: Date.now() }); sendAdminState(); }
-function trackCallConnected(a, b) { const c = activeCalls.get(callKey(a, b)); if (c && c.state !== "connected") { c.state = "connected"; c.since = Date.now(); sendAdminState(); } }
-function trackCallEnd(a, b) { if (activeCalls.delete(callKey(a, b))) sendAdminState(); }
-function endCallsInvolving(n) {
-  let changed = false;
-  for (const [k, c] of activeCalls) if (c.a === n || c.b === n) { activeCalls.delete(k); changed = true; }
-  if (liveBroadcasts.delete(n)) changed = true;
-  if (changed) sendAdminState();
-}
-function sendAdminState() {
-  if (!ADMIN_NAME) return;
-  const s = online.get(ADMIN_NAME); if (!s) return;
-  send(s, { t: "adminState",
-    users: db.users.map(u => ({ name: u, online: online.has(u), granted: !!db.adminGrants[u], banned: db.bans.includes(u) })),
-    reports: db.reports.slice(-200).reverse(),
-    calls: [...activeCalls.values()],
-    broadcasts: [...liveBroadcasts.entries()].map(([user, since]) => ({ user, since })) });
-}
-
 setInterval(() => { // expire stories, drop abandoned uploads
   activeStories();
   Object.entries(db.files).forEach(([id, f]) => { if (!f.used && f.at < Date.now() - 3600e3) removeFile(id); });
@@ -209,21 +175,18 @@ wss.on("connection", ws => {
     if (d.t === "join") {
       const n = String(d.name || "").trim();
       if (!NAME_RE.test(n)) return send(ws, { t: "error", text: "Username can only contain letters and numbers (no spaces or symbols), up to 20 characters." });
-      if (db.bans.includes(n)) return send(ws, { t: "error", text: "This username has been banned." });
       if (online.has(n)) return send(ws, { t: "error", text: "That username is already online." });
       name = n; online.set(n, ws);
       token = rid() + rid() + rid(); tokens.set(token, n);
       if (!db.users.includes(n)) { db.users.push(n); save(); }
-      send(ws, { t: "joined", name: n, token, admin: isAdmin(n), adminName: ADMIN_NAME || null,
-                 granted: !!db.adminGrants[n], history: db.messages.filter(m => m.from === n || m.to === n).slice(-500) });
+      send(ws, { t: "joined", name: n, token, history: db.messages.filter(m => m.from === n || m.to === n).slice(-500) });
       pushSocial(n); friendsOf(n).forEach(pushSocial);
-      sendAdminState();
       const call = pendingCalls.get(n);                 // someone rang while you were away
       if (call) {
         pendingCalls.delete(n);
-        if ((isFriend(call.from, n) || (isAdmin(call.from) && db.adminGrants[n])) && online.has(call.from)) {
-          send(ws, { t: "signal", from: call.from, kind: "offer", data: call.offer, admin: isAdmin(call.from) || undefined });
-          call.ice.forEach(c => send(ws, { t: "signal", from: call.from, kind: "ice", data: c, admin: isAdmin(call.from) || undefined }));
+        if (isFriend(call.from, n) && online.has(call.from)) {
+          send(ws, { t: "signal", from: call.from, kind: "offer", data: call.offer });
+          call.ice.forEach(c => send(ws, { t: "signal", from: call.from, kind: "ice", data: c }));
         }
       }
       return;
@@ -283,60 +246,12 @@ wss.on("connection", ws => {
       if (i !== -1) { const [s] = db.stories.splice(i, 1); if (s.file) removeFile(s.file.id); save(); pushSocial(name); friendsOf(name).forEach(pushSocial); }
     }
 
-    // ----- reports (anyone can flag a user for the admin) -----
-    if (d.t === "report") {
-      const target = String(d.target || "").trim();
-      if (!target || !db.users.includes(target) || target === name) return;
-      const reason = String(d.reason || "").trim().slice(0, 500);
-      const messageId = d.messageId ? String(d.messageId) : null;
-      db.reports.push({ id: rid(), from: name, target, messageId, reason, at: Date.now(), status: "open" });
-      save(); notify(name, "Report sent. Thanks for flagging this.");
-      sendAdminState();
-    }
-
-    // ----- opt-in: let the single admin call me anytime, no ring prompt -----
-    // Entirely the user's own choice, set from their own profile, revocable at any
-    // moment; the client shows an on-screen indicator for as long as a call with
-    // the admin is active.
-    if (d.t === "grantAdmin" && ADMIN_NAME && name !== ADMIN_NAME) {
-      const on = !!d.on;
-      db.adminGrants[name] = on; save();
-      notify(name, on ? "The admin may now call you anytime without you having to accept." : "Admin calling access revoked.");
-      if (!on) { const s = online.get(name); if (s) send(s, { t: "signal", from: ADMIN_NAME, kind: "hangup" }); trackCallEnd(ADMIN_NAME, name); } // drop any live admin call immediately
-      sendAdminState();
-    }
-
-    // ----- broadcasting (user starts it; only the admin can join and watch) -----
-    if (d.t === "broadcastStart") { liveBroadcasts.set(name, Date.now()); sendAdminState(); }
-    if (d.t === "broadcastStop") {
-      if (liveBroadcasts.delete(name)) {
-        sendAdminState();
-        const as = online.get(ADMIN_NAME); if (as) send(as, { t: "signal", from: name, kind: "hangup", broadcast: true });
-      }
-    }
-    if (d.t === "broadcastJoin" && isAdmin(name)) {
-      const from = String(d.from || ""), s = online.get(from);
-      if (s && liveBroadcasts.has(from)) send(s, { t: "broadcastRequest", from: ADMIN_NAME });
-      else notify(name, `${from} is not currently broadcasting.`);
-    }
-
-    // ----- call setup relay (friends, admin-granted users, and broadcast pairs only) -----
+    // ----- call setup relay (friends only) -----
     if (d.t === "signal") {
       const to = String(d.to || ""), peer = online.get(to);
-      const grantedLink = (isAdmin(name) && db.adminGrants[to]) || (isAdmin(to) && db.adminGrants[name]);
-      const broadcastLink = (liveBroadcasts.has(name) && isAdmin(to)) || (liveBroadcasts.has(to) && isAdmin(name));
-      const allowed = isFriend(name, to) || grantedLink || broadcastLink;
-      if (!allowed) { if (d.kind === "offer") send(ws, { t: "signal", from: to, kind: "unavailable" }); }
-      else if (peer) {
-        send(peer, { t: "signal", from: name, kind: d.kind, data: d.data,
-                      ...(isAdmin(name) ? { admin: true } : {}), ...(broadcastLink ? { broadcast: true } : {}) });
-        if (!broadcastLink) {
-          if (d.kind === "offer") trackCallStart(name, to);
-          else if (d.kind === "answer") trackCallConnected(name, to);
-          else if (d.kind === "hangup" || d.kind === "reject" || d.kind === "busy") trackCallEnd(name, to);
-        }
-      }
-      else if (d.kind === "offer" && !broadcastLink) {                    // friend/granted user is offline: ring their phone/browser via push
+      if (!isFriend(name, to)) { if (d.kind === "offer") send(ws, { t: "signal", from: to, kind: "unavailable" }); }
+      else if (peer) send(peer, { t: "signal", from: name, kind: d.kind, data: d.data });
+      else if (d.kind === "offer") {                    // friend is offline: ring their phone/browser via push
         if ((db.push[to] || []).length) {
           const entry = { from: name, offer: d.data, ice: [], at: Date.now() };
           pendingCalls.set(to, entry);
@@ -352,7 +267,7 @@ wss.on("connection", ws => {
 
     // ----- messages (text, photo, video, file) -----
     if (d.t === "delete") {
-      const i = db.messages.findIndex(x => x.id === d.id && (x.from === name || isAdmin(name)));
+      const i = db.messages.findIndex(x => x.id === d.id && x.from === name);
       if (i !== -1) {
         const [m] = db.messages.splice(i, 1); if (m.file) removeFile(m.file.id); save();
         new Set([m.from, m.to]).forEach(n => { const s = online.get(n); if (s) send(s, { t: "deleted", id: m.id }); });
@@ -374,36 +289,6 @@ wss.on("connection", ws => {
       if (peer && peer !== ws) send(peer, { t: "msg", m });
     }
 
-    // ----- admin-only: moderation and dashboard -----
-    if (isAdmin(name)) {
-      if (d.t === "adminState") sendAdminState();
-      if (d.t === "adminKick") {
-        const u = String(d.user || ""), s = online.get(u);
-        if (s) { notify(u, "You were disconnected by an admin."); s.close(); }
-      }
-      if (d.t === "adminBan") {
-        const u = String(d.user || "");
-        if (u && u !== ADMIN_NAME && !db.bans.includes(u)) { db.bans.push(u); save(); }
-        const s = online.get(u); if (s) { send(s, { t: "banned" }); s.close(); }
-        sendAdminState();
-      }
-      if (d.t === "adminUnban") { db.bans = db.bans.filter(x => x !== String(d.user || "")); save(); sendAdminState(); }
-      if (d.t === "adminStopBroadcast") {
-        const u = String(d.user || "");
-        if (liveBroadcasts.delete(u)) {
-          sendAdminState();
-          const s = online.get(u);
-          // Tell the broadcaster's own device to actually turn its camera off and
-          // show them why — this never happens silently, and it only ever stops
-          // a share the person themselves started.
-          if (s) { send(s, { t: "stopShareRequest" }); notify(u, "The admin stopped your broadcast."); }
-          if (ws) send(ws, { t: "signal", from: u, kind: "hangup", broadcast: true }); // also close the admin's own viewer connection, if open
-        }
-      }
-      if (d.t === "adminResolveReport") { const r = db.reports.find(r => r.id === d.id); if (r) { r.status = "resolved"; save(); sendAdminState(); } }
-      if (d.t === "adminDismissReport") { const r = db.reports.find(r => r.id === d.id); if (r) { r.status = "dismissed"; save(); sendAdminState(); } }
-    }
-
     // ----- delete my account -----
     if (d.t === "deleteAccount") {
       const gone = name, ex = friendsOf(gone);
@@ -417,27 +302,19 @@ wss.on("connection", ws => {
       db.messages = db.messages.filter(m => m.from !== gone && m.to !== gone);
       db.friends = db.friends.filter(p => !p.includes(gone));
       db.requests = db.requests.filter(r => r.from !== gone && r.to !== gone);
-      delete db.push[gone]; delete db.adminGrants[gone];
-      pendingCalls.delete(gone); pendingCalls.forEach((c, k) => { if (c.from === gone) pendingCalls.delete(k); });
+      delete db.push[gone]; pendingCalls.delete(gone); pendingCalls.forEach((c, k) => { if (c.from === gone) pendingCalls.delete(k); });
       save(); online.delete(gone); tokens.delete(token); name = null;
-      endCallsInvolving(gone);
       send(ws, { t: "accountDeleted" });
       ex.forEach(f => { const s = online.get(f); if (s) send(s, { t: "userDeleted", name: gone }); });
       affected.forEach(pushSocial);
-      sendAdminState();
       ws.close();
     }
   });
   ws.on("close", () => {
     if (token) tokens.delete(token);
     if (name) pendingCalls.forEach((c, k) => { if (c.from === name) pendingCalls.delete(k); });
-    if (name) endCallsInvolving(name);
     if (name && online.get(name) === ws) { online.delete(name); friendsOf(name).forEach(pushSocial); }
-    sendAdminState();
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Relay running at http://localhost:${PORT}`);
-  console.log(ADMIN_NAME ? `Admin account: ${ADMIN_NAME}` : "No ADMIN_USERNAME set — admin dashboard is disabled.");
-});
+server.listen(PORT, () => console.log(`Relay running at http://localhost:${PORT}`));
