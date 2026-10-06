@@ -31,7 +31,7 @@ Pick different usernames and chat or press **Video call**.
 
 ## Good to know
 - Render free plan sleeps after ~15 min idle; the first visit afterwards takes about a minute to wake.
-- Free hosting has no permanent disk, so `data.json` (chat history) resets when the app restarts or redeploys.
+- Free hosting has no permanent disk, so `data.json` (accounts, chat history) and the `uploads` folder (profile pictures, photos) reset when the app restarts or redeploys. On a paid Render plan attach a Disk and set the env var `DATA_DIR` to its mount path to keep everything.
   For permanent history, move storage to a database (e.g. Render Postgres) - ask and I can add it.
-- Usernames have no passwords. Anyone with the link can join and claim an unused name.
+- Anyone with the link can create an account with an unused username, so share the link only with people you trust.
 - Check TURN: open `https://YOUR-APP/ice-config` - you should see a second entry with your TURN urls.
