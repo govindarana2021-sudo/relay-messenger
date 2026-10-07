@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Relay Messenger</title>
+<link rel="manifest" href="/manifest.json"><link rel="icon" href="/icon.svg"><meta name="theme-color" content="#0f766e">
+<style>
+:root{--bg:#eef2f1;--panel:#fff;--ink:#16302b;--mute:#6b807b;--line:#d9e3e0;--me:#0f766e;--me-ink:#fff;--them:#e6efed;--accent:#f59e0b;--danger:#c2410c;--ok:#22c55e;
+box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1716;--panel:#14211f;--ink:#e3efec;--mute:#8aa39d;--line:#243532;--me:#14a396;--me-ink:#04201d;--them:#1d2e2b;--danger:#fb923c}}
+:root[data-theme="dark"]{--bg:#0d1716;--panel:#14211f;--ink:#e3efec;--mute:#8aa39d;--line:#243532;--me:#14a396;--me-ink:#04201d;--them:#1d2e2b;--danger:#fb923c}
+*{box-sizing:inherit}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Trebuchet MS","Segoe UI",system-ui,sans-serif;display:flex;justify-content:center;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button{font:inherit;color:inherit}
+input,textarea{font:inherit;color:var(--ink)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ib{border:0;background:none;cursor:pointer;font-size:20px;line-height:1;padding:8px;border-radius:50%;color:var(--mute)}
+.ib:hover{background:var(--them);color:var(--ink)}
+.pri{border:0;background:var(--accent);color:#2b1a00;font-weight:700;border-radius:10px;padding:10px 14px;cursor:pointer}
+.pri:disabled{opacity:.6;cursor:default}
+.sec-btn{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 12px;cursor:pointer}
+.sec-btn:hover{background:var(--them)}
+.sec-btn.on{background:var(--me);color:var(--me-ink);border-color:var(--me)}
+.danger{color:var(--danger)}
+.field{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px}
+
+/* avatars */
+.av{position:relative;display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--me) center/cover no-repeat;color:#fff;font-weight:700;flex:none;user-select:none}
+.av.sm{width:34px;height:34px;font-size:14px}.av.lg{width:96px;height:96px;font-size:38px}.av.xl{width:120px;height:120px;font-size:48px}
+.av.story{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.dot{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;background:var(--ok);border:2px solid var(--panel)}
+.avbtn{border:0;background:none;padding:0;cursor:pointer;border-radius:50%;display:inline-flex}
+
+/* layout */
+#app{display:flex;width:100%;max-width:1040px;height:100%;background:var(--panel);border-inline:1px solid var(--line)}
+#side{width:340px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+#sh{display:flex;align-items:center;gap:10px;padding:12px 14px}
+#sh h1{margin:0;font:700 22px Georgia,serif;flex:1}
+#adminBtn{border:1px solid var(--line);background:var(--bg);border-radius:14px;padding:5px 12px;font-size:12px;cursor:pointer}
+#sw{padding:0 14px 8px}
+#search{border-radius:20px;padding:9px 14px}
+#addf{display:flex;gap:8px;padding:0 14px 10px}
+#addf input{flex:1;min-width:0}
+#note{font-size:12px}#note:not(:empty){padding:6px 14px;background:var(--them)}
+#list{overflow-y:auto;flex:1}
+.sec{padding:10px 16px 4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.c{display:flex;gap:12px;align-items:center;padding:10px 14px;cursor:pointer;border:0;background:none;width:100%;text-align:left}
+.c:hover,.c.on{background:var(--them)}
+.c .mid{flex:1;min-width:0}.c .mid b,.c .mid small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c .mid small{color:var(--mute)}.c.unread .mid b,.c.unread .mid small{font-weight:700;color:var(--ink)}
+.c .meta{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:11px;color:var(--mute);min-width:42px}
+.badge{background:var(--me);color:var(--me-ink);border-radius:10px;min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;font-weight:700;font-size:12px}
+.req{display:flex;gap:8px;align-items:center;padding:8px 14px}
+.req span.n{flex:1;min-width:0;overflow-wrap:anywhere}
+.req button.sm{border:0;border-radius:14px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer}
+.req .ok{background:var(--me);color:var(--me-ink)}.req .no{background:var(--them)}
+.empty{margin:auto;color:var(--mute);text-align:center;max-width:300px;padding:24px}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#head{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+#head .t{min-width:0;flex:1}#head b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#sub{display:block;font-size:12px;color:var(--mute)}
+#back{display:none}
+#callBtn{border:0;background:var(--me);color:var(--me-ink);border-radius:18px;padding:7px 14px;font-weight:700;cursor:pointer}
+#callBtn:disabled{opacity:.4;cursor:default}
+#msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:4px;background:var(--bg)}
+.day{align-self:center;font-size:11px;color:var(--mute);margin:10px 0 4px}
+.m{max-width:75%;padding:8px 12px;border-radius:18px;background:var(--them);align-self:flex-start;overflow-wrap:anywhere;white-space:pre-wrap}
+.m.me{background:var(--me);color:var(--me-ink);align-self:flex-end}
+.m.photo{padding:4px}.m.photo .cap{padding:4px 8px 0}
+.m .media{display:block;max-width:100%;max-height:300px;border-radius:14px;cursor:zoom-in;background:var(--line);min-width:120px;min-height:80px}
+.m video.media{width:260px;cursor:default}
+.m .filelink{display:block;color:inherit;font-weight:700;text-decoration:underline;margin-bottom:4px;overflow-wrap:anywhere}
+.m time{display:block;font-size:11px;opacity:.65;margin-top:2px;white-space:normal}
+.m.photo time{padding:0 8px 2px}
+.m .act{display:inline-block;margin:2px 10px 0 0;border:0;background:none;color:inherit;opacity:.55;font-size:11px;cursor:pointer;padding:0;text-decoration:underline}
+.m.photo .act{margin-left:8px}
+.m .act:hover,.m .act:focus-visible{opacity:1}
+.rcpt{align-self:flex-end;font-size:11px;color:var(--mute);margin:0 6px 4px}
+.dots{align-self:flex-start;background:var(--them);border-radius:18px;padding:10px 14px;display:flex;gap:4px}
+.dots i{width:7px;height:7px;border-radius:50%;background:var(--mute);animation:bl 1.2s infinite}.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes bl{0%,60%,100%{opacity:.3}30%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.dots i{animation:none}}
+#bar{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line);align-items:center;position:relative}
+#bar #txt{flex:1;min-width:0;border-radius:20px;padding:10px 14px}
+#bar #send{border:0;background:var(--accent);color:#2b1a00;font-weight:700;border-radius:20px;padding:10px 18px;cursor:pointer}
+#emojis{position:absolute;left:8px;bottom:62px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;box-shadow:0 8px 30px #0004;z-index:5;max-width:calc(100vw - 16px)}
+#emojis button{border:0;background:none;font-size:22px;padding:4px;cursor:pointer;border-radius:8px}#emojis button:hover{background:var(--them)}
+@media(max-width:700px){#side{width:100%}#main{display:none}#app.chat #side{display:none}#app.chat #main{display:flex}#back{display:block}#app{border:0}}
+
+/* login */
+#login{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:50;overflow:auto;padding:16px}
+#lf{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:26px 24px;display:flex;flex-direction:column;gap:12px;width:min(380px,100%);margin:auto}
+.logo{width:56px;height:56px;border-radius:16px;background:var(--me);color:var(--me-ink);display:grid;place-items:center;font:700 30px Georgia,serif;align-self:center}
+#lf h2{margin:0;font:700 26px Georgia,serif;text-align:center}
+.tagline{margin:0;text-align:center;color:var(--mute);font-size:14px}
+.tabs{display:flex;background:var(--bg);border-radius:12px;padding:4px}
+.tabs button{flex:1;border:0;background:none;padding:8px;border-radius:9px;cursor:pointer;color:var(--mute);font-weight:700}
+.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px #0002}
+#lf form{display:flex;flex-direction:column;gap:10px}
+#lf label.l{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
+.chk{font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:center}
+#err{margin:0;color:var(--danger);min-height:1.2em;font-size:13px}
+.hint{margin:0;font-size:12px;color:var(--mute)}
+.pick{display:flex;flex-direction:column;align-items:center;gap:6px}
+.pick button.link{border:0;background:none;color:var(--me);font-weight:700;cursor:pointer}
+
+/* modals */
+.modal{position:fixed;inset:0;background:#000a;z-index:40;display:grid;place-items:center;padding:16px;overflow:auto}
+.modal .card{background:var(--panel);border-radius:18px;width:min(440px,100%);padding:22px;display:flex;flex-direction:column;gap:12px;position:relative;margin:auto;max-height:100%;overflow:auto}
+.modal .x{position:absolute;right:10px;top:10px}
+.modal .c1{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.modal .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}.modal .row>*{flex:1}
+.modal label.l{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
+.modal textarea{resize:none}
+.un{color:var(--mute);font-size:13px}
+.modal h3{margin:0;font-size:20px;overflow-wrap:anywhere}
+.modal .about{margin:0;color:var(--mute);overflow-wrap:anywhere;white-space:pre-wrap}
+.modal .sec{padding:6px 0 0}
+.chkrow{display:flex;gap:8px;align-items:center;font-size:13px}
+details{border:1px solid var(--line);border-radius:10px;padding:8px 12px}summary{cursor:pointer;font-weight:700}details>*{margin-top:8px}
+#lb{position:fixed;inset:0;background:#000d;z-index:60;display:grid;place-items:center;padding:16px;cursor:zoom-out}
+#lb img{max-width:100%;max-height:100%;border-radius:8px}
+.stadd{display:flex;gap:8px}.stadd input{flex:1;min-width:0}
+.st{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--bg)}
+.st.text{font-size:18px;text-align:center;padding:26px 12px;background:var(--me);color:var(--me-ink);border:0}
+.st .media{display:block;max-width:100%;max-height:340px;margin:0 auto 6px;border-radius:10px}.st video.media{width:100%}
+.st small{display:flex;justify-content:space-between;align-items:center;opacity:.75;font-size:12px}
+.st small button{border:0;background:none;color:inherit;text-decoration:underline;cursor:pointer}
+.stl{display:flex;flex-direction:column;gap:8px}
+
+/* admin */
+.arow{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.arow span.who{flex:1;min-width:120px;overflow-wrap:anywhere}
+.arow button{border:0;border-radius:12px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;background:var(--them)}
+.arow button.dng{background:#dc2626;color:#fff}
+.chip{font-size:11px;padding:1px 7px;border-radius:10px;background:var(--them);color:var(--mute)}
+.chip.on{background:var(--accent);color:#2b1a00}
+.chip.off{background:#dc2626;color:#fff}
+
+/* calls */
+#call{position:fixed;inset:0;background:#05100e;z-index:70;display:flex;flex-direction:column}
+#rv{flex:1;min-height:0;width:100%;object-fit:cover;background:#05100e}
+#lv{position:absolute;right:14px;top:calc(14px + env(safe-area-inset-top,0px));width:110px;max-width:28vw;border-radius:12px;border:2px solid #ffffff55;background:#000;transform:scaleX(-1)}
+#cstat{position:absolute;left:0;right:0;top:40%;text-align:center;color:#fff;font:700 20px Georgia,serif;text-shadow:0 1px 6px #000;pointer-events:none;padding:0 16px}
+#callIndicator{position:absolute;left:0;right:0;bottom:84px;text-align:center;color:#fff;font-size:12px;background:#0008;padding:4px;pointer-events:none}
+#cctl{display:flex;justify-content:center;gap:10px;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));flex-wrap:wrap}
+#cctl button{border:0;border-radius:24px;padding:12px 18px;font-weight:700;cursor:pointer;background:#ffffff26;color:#fff}
+#cctl button.off{background:#fff;color:#111}
+#cctl #hang{background:#dc2626}
+#incoming{position:fixed;left:50%;transform:translateX(-50%);top:calc(14px + env(safe-area-inset-top,0px));z-index:80;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:12px 16px;display:flex;gap:12px;align-items:center;box-shadow:0 8px 30px #0006;width:max-content;max-width:94vw}
+#incoming button{border:0;border-radius:18px;padding:8px 14px;font-weight:700;cursor:pointer}
+#acc{background:var(--me);color:var(--me-ink)}#dec{background:#dc2626;color:#fff}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div id="lf">
+    <div class="logo" aria-hidden="true">R</div>
+    <h2>Relay</h2>
+    <p class="tagline">Message and video call your friends.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" id="tabIn" class="on" role="tab" aria-selected="true">Log in</button>
+      <button type="button" id="tabUp" role="tab" aria-selected="false">Create account</button>
+    </div>
+    <form id="fin">
+      <label class="l">Username<input class="field" id="lu" maxlength="20" autocomplete="username" autocapitalize="none" required></label>
+      <label class="l">Password<input class="field pw" id="lp" type="password" maxlength="100" autocomplete="current-password" required></label>
+      <button class="pri" id="lbtn">Log in</button>
+      <p class="hint">Account from before passwords existed? Enter your username and choose a new password (6+ characters) to secure it.</p>
+    </form>
+    <form id="fup" hidden>
+      <div class="pick"><span class="av xl" id="suAv"></span><input type="file" id="suFile" accept="image/*" hidden>
+        <button type="button" class="link" id="suPick">Add profile photo</button></div>
+      <label class="l">Username (letters and numbers only)<input class="field" id="su" maxlength="20" autocomplete="username" autocapitalize="none" pattern="[A-Za-z0-9]{1,20}" title="Letters and numbers only, up to 20" required></label>
+      <label class="l">Display name (optional)<input class="field" id="sd" maxlength="30" autocomplete="name"></label>
+      <label class="l">Password<input class="field pw" id="sp" type="password" minlength="6" maxlength="100" autocomplete="new-password" required></label>
+      <label class="l">Confirm password<input class="field pw" id="sp2" type="password" minlength="6" maxlength="100" autocomplete="new-password" required></label>
+      <button class="pri" id="sbtn">Create account</button>
+    </form>
+    <label class="chk"><input type="checkbox" id="showpw"> Show password</label>
+    <p id="err" role="alert"></p>
+  </div>
+</div>
+
+<div id="app">
+  <aside id="side">
+    <div id="sh"><button class="avbtn" id="meBtn" aria-label="Your profile and settings"></button><h1>Chats</h1><button id="adminBtn" hidden>Admin</button><button class="ib" id="addBtn" aria-label="Add friend" title="Add friend">&#43;</button></div>
+    <form id="addf" hidden><input class="field" id="fr" maxlength="20" placeholder="Friend's username" aria-label="Friend username" autocomplete="off" autocapitalize="none"><button class="pri" id="frbtn">Add</button></form>
+    <div id="note" role="status"></div>
+    <div id="sw"><input class="field" id="search" type="search" placeholder="Search chats" aria-label="Search chats" autocomplete="off"></div>
+    <div id="list"></div>
+  </aside>
+  <section id="main">
+    <div id="head"><button class="ib" id="back" aria-label="Back to chats">&larr;</button><button class="avbtn" id="hav" aria-label="View profile" hidden></button><div class="t"><b id="title">Pick a chat</b><small id="sub"></small></div><button id="callBtn" disabled>Video call</button><button class="ib" id="infoBtn" aria-label="Profile info" title="Profile" hidden>&#9432;</button></div>
+    <div id="msgs"><div class="empty">Choose a chat to start messaging.</div></div>
+    <form id="bar" onsubmit="return false">
+      <button type="button" class="ib" id="attach" aria-label="Attach a photo, video or file" title="Attach a photo, video or file">&#128206;</button>
+      <input type="file" id="pick" hidden>
+      <button type="button" class="ib" id="emo" aria-label="Emoji" title="Emoji">&#128522;</button>
+      <input class="field" id="txt" placeholder="Write a message" autocomplete="off" aria-label="Message">
+      <button id="send">Send</button>
+      <div id="emojis" hidden></div>
+    </form>
+  </section>
+</div>
+
+<!-- my profile -->
+<div class="modal" id="pm" hidden role="dialog" aria-modal="true" aria-label="Your profile">
+  <div class="card">
+    <button class="ib x" data-close aria-label="Close">&#10005;</button>
+    <div class="c1"><span id="pmAv"></span>
+      <div class="row"><button class="sec-btn" id="pmPick">Change photo</button><button class="sec-btn" id="pmRm">Remove photo</button></div>
+      <input type="file" id="avFile" accept="image/*" hidden>
+      <div class="un">@<span id="pmUn"></span></div>
+    </div>
+    <label class="l">Display name<input class="field" id="pmDisp" maxlength="30"></label>
+    <label class="l">About<textarea class="field" id="pmBio" maxlength="140" rows="2" placeholder="Say something about yourself"></textarea></label>
+    <button class="pri" id="pmSave">Save profile</button>
+
+    <div class="sec">My story (friends see it for 24 hours)</div>
+    <div class="stadd"><button type="button" class="sec-btn" id="stFile">Photo or video story</button><input type="file" id="stPick" accept="image/*,video/*" hidden></div>
+    <div class="stadd"><input class="field" id="stT" maxlength="300" placeholder="Or write a text story" aria-label="Text story"><button type="button" class="pri" id="stPost">Post</button></div>
+    <div class="stl" id="myStories"></div>
+
+    <div class="sec">Calls</div>
+    <div id="permInfo" class="hint"></div>
+    <div class="row"><button type="button" class="sec-btn" id="permBtn">Allow camera &amp; mic</button><button type="button" class="sec-btn" id="pushBtn">Turn on call notifications</button></div>
+    <p class="hint">Press the first button once and choose <b>Allow</b> (not "Allow this time"); Chrome and Edge then remember it, so calls won't ask again. Firefox: tick "Remember this decision". Safari: Settings &rarr; Websites &rarr; Camera/Microphone &rarr; Allow. Notifications let friends ring you when Relay is closed; tap the notification to answer. iPhone: first Share &rarr; Add to Home Screen.</p>
+    <button class="sec-btn" id="autoBtn" aria-pressed="false">Auto-answer all friends' calls: Off</button>
+    <p class="hint" id="autoHint" hidden>Calls from friends connect right away and your camera and microphone turn on. Applies to this device only. You can also turn auto-answer on or off for one friend from their profile or the call screen.</p>
+
+    <div id="grantBox" hidden>
+      <div class="sec">Admin access</div>
+      <label class="chkrow"><input type="checkbox" id="grantChk"> Allow the admin to call me anytime, without asking me first</label>
+      <p class="hint" id="grantNote"></p>
+    </div>
+    <div class="sec">Broadcast</div>
+    <p class="hint">Start a one-way broadcast from your camera. Only the admin can join and watch; they can never start a broadcast from your camera themselves.</p>
+    <div class="row"><button type="button" class="sec-btn" id="bcBtn">Start broadcast</button></div>
+    <video id="bcLocal" autoplay playsinline muted hidden style="width:160px;border-radius:10px;transform:scaleX(-1)"></video>
+
+    <details><summary>Change password</summary>
+      <input class="field" id="pwOld" type="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password">
+      <input class="field" id="pwNew" type="password" placeholder="New password (6+ characters)" autocomplete="new-password" aria-label="New password">
+      <button class="sec-btn" id="pwSave">Update password</button>
+    </details>
+    <button class="sec-btn" id="themeBtn">Theme: Auto</button>
+    <div class="row"><button class="sec-btn" id="logout">Log out</button><button class="sec-btn danger" id="delacct">Delete account</button></div>
+    <div id="delBox" hidden>
+      <label class="l">Enter your password to delete your account and all your messages. This cannot be undone.<input class="field" id="delPw" type="password" autocomplete="current-password"></label>
+      <div class="row" style="margin-top:8px"><button class="sec-btn" id="delNo">Cancel</button><button class="pri" id="delYes" style="background:#dc2626;color:#fff">Delete forever</button></div>
+    </div>
+    <p id="pmMsg" class="hint" role="status"></p>
+  </div>
+</div>
+
+<!-- friend profile -->
+<div class="modal" id="fm" hidden role="dialog" aria-modal="true" aria-label="Friend profile">
+  <div class="card">
+    <button class="ib x" data-close aria-label="Close">&#10005;</button>
+    <div class="c1"><span id="fmAv"></span><h3 id="fmName"></h3><div class="un" id="fmUn"></div><div class="un" id="fmStat"></div><p class="about" id="fmBio"></p></div>
+    <div class="row"><button class="pri" id="fmCall">Video call</button><button class="sec-btn danger" id="fmRm">Remove friend</button></div>
+    <label class="chkrow"><input type="checkbox" id="autoChk"> Auto-answer video calls from this friend</label>
+    <button type="button" class="sec-btn" id="reportBtn">Report this user</button>
+    <p id="fmMsg" class="hint" role="status"></p>
+    <div class="sec" id="fmStTitle">Story</div>
+    <div class="stl" id="fmStories"></div>
+  </div>
+</div>
+
+<!-- admin dashboard -->
+<div class="modal" id="admin" hidden role="dialog" aria-modal="true" aria-label="Admin dashboard">
+  <div class="card" style="width:min(560px,100%)">
+    <button class="ib x" data-close aria-label="Close">&#10005;</button>
+    <div><b>Admin dashboard</b><div class="un">Presence, moderation, calls and broadcasts</div></div>
+    <div class="sec">Users</div><div id="aUsers"></div>
+    <div class="sec">Reports</div><div id="aReports"></div>
+    <div class="sec">Active calls</div><div id="aCalls"></div>
+    <div class="sec">Live broadcasts</div><div id="aBroadcasts"></div>
+  </div>
+</div>
+
+<div id="lb" hidden><img alt="Photo"></div>
+<div id="incoming" hidden role="alertdialog" aria-label="Incoming call"><span id="callerAv"></span><span><b id="caller"></b> is calling</span><button id="acc">Accept</button><button id="dec">Decline</button></div>
+<div id="call" hidden>
+  <video id="rv" autoplay playsinline></video>
+  <video id="lv" autoplay playsinline muted></video>
+  <div id="cstat"></div>
+  <div id="callIndicator" hidden></div>
+  <div id="cctl"><button id="mic">Mute</button><button id="cam">Camera off</button><button id="callAuto" type="button"></button><button id="stopShareBtn" type="button" hidden>Stop share</button><button id="hang">End call</button></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e};
+const esc=s=>String(s).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+const tm=t=>new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+const dayKey=t=>new Date(t).toDateString();
+function dayLabel(t){const d=new Date(t),n=new Date();if(d.toDateString()===n.toDateString())return"Today";n.setDate(n.getDate()-1);if(d.toDateString()===n.toDateString())return"Yesterday";return d.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"})}
+function short(t){const d=new Date(t);return d.toDateString()===new Date().toDateString()?tm(t):d.toLocaleDateString([],{month:"short",day:"numeric"})}
+function ago(t){if(!t)return"Offline";const s=Math.max(1,Math.round((Date.now()-t)/1000));if(s<60)return"Active just now";if(s<3600)return"Active "+Math.round(s/60)+" min ago";if(s<86400)return"Active "+Math.round(s/3600)+" h ago";return"Last seen "+dayLabel(t).toLowerCase()}
+const agoStory=t=>{const m=Math.floor((Date.now()-t)/60000);return m<1?"just now":m<60?m+" min ago":Math.floor(m/60)+" h ago"};
+const agoShort=t=>{const s=Math.floor((Date.now()-t)/1000);return s<60?s+"s":Math.floor(s/60)+"m "+(s%60)+"s"};
+
+let ws,me=null,cur=null,friends=[],incoming=[],outgoing=[],stories=[],log={},typingFrom={},session=null,token="",signupAv=null,pendingAuth=null,authing=false,ownTyping=0;
+let isAdminUser=false,myGrant=false,ADMIN_NAME=null,adminState=null;
+try{session=JSON.parse(localStorage.getItem("relay-session")||"null")}catch(_){}
+const dn=c=>c?(c.display||c.name):"";
+const find=n=>friends.find(f=>f.name===n);
+const nameOf=n=>dn(find(n)||incoming.concat(outgoing).find(x=>x.name===n)||{name:n});
+const storiesOf=u=>stories.filter(s=>s.user===u).sort((a,b)=>a.at-b.at);
+
+/* ---------- avatars ---------- */
+function hue(n){let h=0;for(const ch of n)h=(h*31+ch.charCodeAt(0))>>>0;return h%360}
+function av(c,size,dot){
+  const d=el("span","av"+(size?" "+size:"")+(storiesOf(c.name).length?" story":""));
+  const letter=el("span",null,(dn(c)[0]||"?").toUpperCase());d.style.background="hsl("+hue(c.name)+" 45% 38%)";d.append(letter);
+  if(c.av){const url="/avatar/"+encodeURIComponent(c.name)+"?v="+c.av,im=new Image();
+    im.onload=()=>{d.style.backgroundImage='url("'+url+'")';letter.remove()};im.src=url}
+  if(dot&&c.online)d.append(el("i","dot"));
+  d.setAttribute("aria-hidden","true");
+  return d;
+}
+const put=(host,node)=>host.replaceChildren(node);
+
+/* ---------- connection ---------- */
+function connect(){
+  if(ws){ws.onclose=null;ws.onmessage=null;try{ws.close()}catch(_){}}
+  const s=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws=s;
+  s.onopen=()=>{
+    const first=pendingAuth;pendingAuth=null;
+    if(first)s.send(JSON.stringify(first));
+    else if(session)s.send(JSON.stringify({t:"resume",name:session.name,token:session.token}));
+  };
+  s.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch(_){return}handle(d)};
+  s.onclose=()=>{
+    end(false,"Connection lost.");
+    if(me){setTimeout(()=>{if(me&&ws===s)connect()},1500)}
+    else if(authing){authing=false;busy(false);$("err").textContent="Can't reach the server. Check your connection."}
+  };
+}
+function busy(b){["lbtn","sbtn"].forEach(i=>$(i).disabled=b)}
+function tryAuth(msg){$("err").textContent="";authing=true;busy(true);pendingAuth=msg;connect()}
+const act=(t,x)=>ws&&ws.readyState===1&&ws.send(JSON.stringify(Object.assign({t},x)));
+let noteT;function note(t){
+  $("note").textContent=t;$("pmMsg").textContent=t;$("fmMsg").textContent=t;
+  clearTimeout(noteT);noteT=setTimeout(()=>{$("note").textContent=$("pmMsg").textContent=$("fmMsg").textContent=""},6000);
+}
+
+function handle(d){
+  if(d.t==="joined"){
+    me=d.me;token=d.token;session={name:me.name,token:d.token};
+    try{localStorage.setItem("relay-session",JSON.stringify(session))}catch(_){}
+    isAdminUser=!!d.admin;myGrant=!!d.granted;ADMIN_NAME=d.adminName||null;
+    loadAuto();log={};d.history.forEach(store);authing=false;busy(false);
+    $("login").hidden=true;$("err").textContent="";
+    ["lp","sp","sp2"].forEach(i=>$(i).value="");
+    $("adminBtn").hidden=!isAdminUser;
+    renderMe();renderList();renderChat();syncPush();
+    if(signupAv){act("avatar",{data:signupAv});signupAv=null;$("suAv").style.backgroundImage="";$("suAv").textContent="+";$("suPick").textContent="Add profile photo"}
+    if(cur)markRead();
+    return;
+  }
+  if(d.t==="authError"){
+    if(me)resetSession(false);
+    authing=false;busy(false);me=null;
+    if(d.expired){session=null;try{localStorage.removeItem("relay-session")}catch(_){}}
+    $("err").textContent=d.text;$("login").hidden=false;return;
+  }
+  if(!me)return;
+  if(d.t==="me"){me=d.me;renderMe();if(!$("pm").hidden)fillProfile(false)}
+  else if(d.t==="social"){
+    friends=d.friends;incoming=d.incoming;outgoing=d.outgoing;stories=d.stories||[];
+    {const n0=auto.size;[...auto].forEach(n=>{if(!find(n))auto.delete(n)});if(auto.size!==n0)saveAuto()}
+    if(cur&&!find(cur))closeChat();
+    if(peer&&!find(peer)&&peer!==ADMIN_NAME)end(false,"Call ended.");
+    renderMe();renderList();renderHead();renderChat();
+    if(!$("fm").hidden)fillFriend();
+    if(!$("pm").hidden)renderMyExtras();
+  }
+  else if(d.t==="notice")note(d.text);
+  else if(d.t==="msg"){
+    store(d.m);delete typingFrom[d.m.from];
+    if(d.m.from===cur)markRead();
+    renderList();if(cur)renderChat();unreadTitle();
+  }
+  else if(d.t==="deleted"){for(const k in log)log[k]=log[k].filter(m=>m.id!==d.id);renderList();renderChat();unreadTitle()}
+  else if(d.t==="seen"){
+    (log[d.by]||[]).forEach(m=>{if(m.from===me.name&&m.at<=d.upTo)m.seen=m.seen||Date.now()});
+    if(cur===d.by)renderChat();
+  }
+  else if(d.t==="typing"){
+    clearTimeout(typingFrom[d.from]&&typingFrom[d.from].t);
+    typingFrom[d.from]={t:setTimeout(()=>{delete typingFrom[d.from];renderList();renderHead();if(cur===d.from)renderChat()},3500)};
+    renderList();renderHead();if(cur===d.from)renderChat();
+  }
+  else if(d.t==="userDeleted"){
+    delete log[d.name];
+    if(peer===d.name)end(false,"Call ended.");
+    if(cur===d.name)closeChat();
+    renderList();renderChat();
+  }
+  else if(d.t==="passwordChanged"){
+    token=d.token;session={name:me.name,token:d.token};try{localStorage.setItem("relay-session",JSON.stringify(session))}catch(_){}
+    $("pwOld").value=$("pwNew").value="";note("Password updated. Other devices were signed out.");
+  }
+  else if(d.t==="kicked"){resetSession(false);$("err").textContent="You signed in on another device or tab."}
+  else if(d.t==="banned"){resetSession(false);$("err").textContent="Your account has been banned by an admin."}
+  else if(d.t==="accountDeleted")resetSession(false);
+  else if(d.t==="adminState"){adminState=d;renderAdmin()}
+  else if(d.t==="broadcastRequest")onBroadcastRequest(d.from);
+  else if(d.t==="stopShareRequest"){if(broadcasting){stopBroadcast();note("The admin stopped your broadcast.")}}
+  else if(d.t==="signal")onSignal(d);
+}
+function store(m){const c=m.from===me.name?m.to:m.from;(log[c]=log[c]||[]).push(m)}
+const unread=n=>(log[n]||[]).filter(m=>m.to===me.name&&!m.seen).length;
+function unreadTitle(){const n=friends.reduce((a,f)=>a+unread(f.name),0);document.title=(n?"("+n+") ":"")+"Relay Messenger"}
+function markRead(){
+  if(!cur||document.hidden||!unread(cur))return;
+  (log[cur]||[]).forEach(m=>{if(m.to===me.name&&!m.seen)m.seen=Date.now()});
+  act("read",{from:cur});renderList();unreadTitle();
+}
+document.addEventListener("visibilitychange",markRead);window.addEventListener("focus",markRead);
+
+/* ---------- files, photos, videos ---------- */
+const MAX_UPLOAD=25*1024*1024;
+const fileUrl=f=>"/files/"+f.id+"?token="+encodeURIComponent(token);
+const fsize=n=>n<1048576?Math.max(1,Math.round(n/1024))+" KB":(n/1048576).toFixed(1)+" MB";
+function mediaEl(f){
+  let e;
+  if(f.kind==="image"){e=el("img","media");e.src=fileUrl(f);e.alt=f.name;e.loading="lazy";e.onclick=()=>{$("lb").firstChild.src=e.src;$("lb").hidden=false}}
+  else if(f.kind==="video"){e=el("video","media");e.src=fileUrl(f);e.controls=true;e.preload="metadata";e.playsInline=true}
+  else{e=el("a","filelink",f.name+" ("+fsize(f.size)+")");e.href=fileUrl(f);e.download=f.name}
+  return e;
+}
+async function upload(file){
+  if(file.size>MAX_UPLOAD){note("That file is too large (max 25 MB).");return null}
+  note("Uploading "+file.name+"...");
+  try{
+    const r=await fetch("/upload?token="+encodeURIComponent(token)+"&name="+encodeURIComponent(file.name),{method:"POST",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
+    if(!r.ok)throw new Error(r.status===413?"That file is too large (max 25 MB).":"Upload failed. Please try again.");
+    note("");return await r.json();
+  }catch(e){note(e.message||"Upload failed.");return null}
+}
+$("attach").onclick=()=>{if(!cur)return note("Open a chat first.");$("pick").click()};
+$("pick").onchange=async()=>{
+  const f=$("pick").files[0];$("pick").value="";const to=cur;if(!f||!to)return;
+  const up=await upload(f);if(up){act("msg",{to,text:$("txt").value.trim(),fileId:up.id});$("txt").value=""}
+};
+$("lb").onclick=()=>{$("lb").hidden=true};
+
+/* ---------- sidebar ---------- */
+function renderMe(){if(me)put($("meBtn"),av(me,"sm"))}
+function preview(c){
+  const l=log[c.name]||[],last=l[l.length-1];
+  if(typingFrom[c.name])return"typing…";
+  if(!last)return"No messages yet";
+  const body=last.text||(last.file?({image:"📷 Photo",video:"🎞 Video"}[last.file.kind]||"📎 File"):"");
+  return(last.from===me.name?"You: ":"")+body;
+}
+function renderList(){
+  const L=$("list");L.replaceChildren();
+  if(!me)return;
+  const q=$("search").value.trim().toLowerCase();
+  const sec=t=>L.append(el("div","sec",t));
+  const row=(c,label,btns)=>{const r=el("div","req");r.append(av(c,"sm"));r.append(el("span","n",label));
+    btns.forEach(([txt,cls,fn])=>{const b=el("button",cls+" sm",txt);b.onclick=fn;r.append(b)});L.append(r)};
+  if(!q){
+    if(incoming.length){sec("Friend requests");incoming.forEach(c=>row(c,dn(c)+" wants to be friends",[["Accept","ok",()=>act("accept",{from:c.name})],["Decline","no",()=>act("decline",{from:c.name})]]))}
+    if(outgoing.length){sec("Sent requests");outgoing.forEach(c=>row(c,dn(c)+" (pending)",[["Cancel","no",()=>act("cancel",{to:c.name})]]))}
+    if(incoming.length||outgoing.length)sec("Chats");
+  }
+  const lastAt=f=>{const l=log[f.name]||[];return l.length?l[l.length-1].at:0};
+  const shown=friends.filter(f=>!q||dn(f).toLowerCase().includes(q)||f.name.toLowerCase().includes(q)).sort((a,b)=>lastAt(b)-lastAt(a)||dn(a).localeCompare(dn(b)));
+  shown.forEach(f=>{
+    const n=unread(f.name),l=log[f.name]||[],last=l[l.length-1];
+    const b=el("button","c"+(f.name===cur?" on":"")+(n?" unread":""));
+    b.append(av(f,"",true));
+    const mid=el("span","mid");mid.append(el("b",null,dn(f)),el("small",null,preview(f)));b.append(mid);
+    const meta=el("span","meta");meta.append(el("span",null,last?short(last.at):""));if(n)meta.append(el("span","badge",n>99?"99+":n));b.append(meta);
+    b.onclick=()=>openChat(f.name);
+    L.append(b);
+  });
+  if(!shown.length){L.append(el("div","empty",q?"No chats match your search.":"No friends yet. Tap + to add someone by their username, then wait for them to accept."))}
+}
+$("search").oninput=renderList;
+$("addBtn").onclick=()=>{const f=$("addf");f.hidden=!f.hidden;if(!f.hidden)$("fr").focus()};
+$("addf").onsubmit=e=>{e.preventDefault();const n=$("fr").value.trim();if(n)act("request",{to:n});$("fr").value="";$("addf").hidden=true};
+$("meBtn").onclick=()=>{fillProfile(true);$("pm").hidden=false;$("pmDisp").focus()};
+
+/* ---------- chat ---------- */
+function openChat(n){cur=n;$("app").classList.add("chat");renderList();renderHead();renderChat(true);markRead();if(!matchMedia("(max-width:700px)").matches)$("txt").focus()}
+function closeChat(){cur=null;$("app").classList.remove("chat");renderHead();renderList();renderChat()}
+function renderHead(){
+  const f=cur&&find(cur);
+  $("hav").hidden=$("infoBtn").hidden=!f;$("callBtn").disabled=!f;
+  if(!f){$("title").textContent="Pick a chat";$("sub").textContent="";return}
+  put($("hav"),av(f,"sm",true));$("title").textContent=dn(f);
+  $("sub").textContent=typingFrom[f.name]?"typing…":(f.online?"Active now":ago(f.lastSeen));
+}
+function renderChat(force){
+  const box=$("msgs");
+  const near=box.scrollHeight-box.scrollTop-box.clientHeight<140;
+  box.replaceChildren();
+  if(!cur){box.append(el("div","empty","Choose a chat to start messaging."));return}
+  const l=log[cur]||[],f=find(cur);
+  if(!l.length&&!typingFrom[cur]){box.append(el("div","empty","No messages yet. Say hello"+(f?" to "+dn(f):"")+"."));return}
+  let day="",lastMine=null;
+  l.forEach(m=>{
+    if(dayKey(m.at)!==day){day=dayKey(m.at);box.append(el("div","day",dayLabel(m.at)))}
+    const mineM=m.from===me.name,vis=m.file&&m.file.kind!=="file";
+    const d=el("div","m"+(mineM?" me":"")+(vis?" photo":""));d.dataset.id=m.id;
+    if(m.file){const me2=mediaEl(m.file);me2.addEventListener("load",()=>{if(force||near)box.scrollTop=box.scrollHeight});d.append(me2)}
+    if(m.text){if(m.file)d.append(el("div","cap",m.text));else d.append(document.createTextNode(m.text))}
+    d.append(el("time",null,tm(m.at)));
+    if(mineM||isAdminUser){const x=el("button","act",isAdminUser&&!mineM?"Delete (admin)":"Delete");x.setAttribute("aria-label","Delete this message");
+      x.onclick=()=>{if(confirm("Delete this message for everyone?"))act("delete",{id:m.id})};d.append(x)}
+    if(!mineM){const r=el("button","act","Report");r.onclick=()=>{const reason=prompt("Report this message to the admin — what's wrong?");if(reason===null)return;act("report",{target:m.from,messageId:m.id,reason:reason.trim()})};d.append(r)}
+    if(mineM)lastMine=m;
+    box.append(d);
+  });
+  if(lastMine&&l[l.length-1]===lastMine)box.append(el("div","rcpt",lastMine.seen?"Seen":"Sent"));
+  if(typingFrom[cur]){const t=el("div","dots");t.setAttribute("aria-label",dn(f)+" is typing");t.append(el("i"),el("i"),el("i"));box.append(t)}
+  if(force||near)box.scrollTop=box.scrollHeight;
+}
+function sendText(){
+  const text=$("txt").value.trim();
+  if(!text||!cur||!ws||ws.readyState!==1)return;
+  act("msg",{to:cur,text});$("txt").value="";$("emojis").hidden=true;
+}
+$("send").onclick=sendText;
+$("txt").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();sendText()}};
+$("txt").oninput=()=>{if(cur&&$("txt").value&&Date.now()-ownTyping>2000){ownTyping=Date.now();act("typing",{to:cur})}};
+$("back").onclick=()=>{$("app").classList.remove("chat")};
+$("hav").onclick=$("infoBtn").onclick=()=>{if(cur){fillFriend();$("fm").hidden=false}};
+
+/* emoji */
+const EMOJI="😀 😂 🥹 😍 😘 😎 🤔 😭 😡 👍 👎 🙏 👏 🎉 🔥 ❤️ 💔 😴 🤣 😅 😇 🥳 😢 🤗 🙌 💪 👀 ✨ 🌹 ☕ 🍕 🎶".split(" ");
+EMOJI.forEach(e=>{const b=el("button",null,e);b.type="button";b.onclick=()=>{const t=$("txt"),s=t.selectionStart??t.value.length;t.value=t.value.slice(0,s)+e+t.value.slice(t.selectionEnd??s);t.focus();t.selectionStart=t.selectionEnd=s+e.length};$("emojis").append(b)});
+$("emo").onclick=()=>{$("emojis").hidden=!$("emojis").hidden};
+function shrink(file,max,q,square){return new Promise((res,rej)=>{
+  const url=URL.createObjectURL(file),im=new Image();
+  im.onload=()=>{URL.revokeObjectURL(url);
+    let sw=im.naturalWidth,sh=im.naturalHeight,sx=0,sy=0,w,h;
+    if(square){const s=Math.min(sw,sh);sx=(sw-s)/2;sy=(sh-s)/2;sw=sh=s;w=h=Math.min(max,s)}
+    else{const k=Math.min(1,max/Math.max(sw,sh));w=Math.round(sw*k);h=Math.round(sh*k)}
+    const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d");
+    x.fillStyle="#fff";x.fillRect(0,0,w,h);x.drawImage(im,sx,sy,sw,sh,0,0,w,h);res(c.toDataURL("image/jpeg",q));
+  };
+  im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("That file isn't a picture this browser can read."))};
+  im.src=url})}
+
+/* ---------- login / sign up ---------- */
+const NAME_RE=/^[A-Za-z0-9]{1,20}$/;
+function tab(up){
+  $("fin").hidden=up;$("fup").hidden=!up;$("err").textContent="";
+  $("tabIn").className=up?"":"on";$("tabUp").className=up?"on":"";
+  $("tabIn").setAttribute("aria-selected",!up);$("tabUp").setAttribute("aria-selected",up);
+  (up?$("su"):$("lu")).focus();
+}
+$("tabIn").onclick=()=>tab(false);$("tabUp").onclick=()=>tab(true);
+$("showpw").onchange=e=>document.querySelectorAll(".pw").forEach(i=>i.type=e.target.checked?"text":"password");
+$("su").addEventListener("input",()=>{const v=$("su").value.replace(/[^A-Za-z0-9]/g,"");if(v!==$("su").value){$("su").value=v;$("err").textContent="Only letters and numbers are allowed in usernames."}});
+$("fin").onsubmit=e=>{e.preventDefault();tryAuth({t:"login",name:$("lu").value.trim(),password:$("lp").value})};
+$("fup").onsubmit=e=>{
+  e.preventDefault();
+  if(!NAME_RE.test($("su").value.trim())){$("err").textContent="Username can only contain letters and numbers, up to 20 characters.";return}
+  if($("sp").value!==$("sp2").value){$("err").textContent="Passwords don't match.";return}
+  tryAuth({t:"signup",name:$("su").value.trim(),display:$("sd").value.trim(),password:$("sp").value});
+};
+$("suAv").onclick=$("suPick").onclick=()=>$("suFile").click();
+$("suFile").onchange=async e=>{
+  const f=e.target.files[0];e.target.value="";if(!f)return;
+  try{signupAv=await shrink(f,320,.85,true);$("suPick").textContent="Change photo";const a=$("suAv");a.style.backgroundImage='url("'+signupAv+'")';a.textContent=""}
+  catch(err){$("err").textContent=err.message}
+};
+$("suAv").textContent="+";$("suAv").style.cursor="pointer";
+try{const old=localStorage.getItem("relay-name");if(old&&!session)$("lu").value=old}catch(_){}
+
+/* ---------- my profile ---------- */
+function pmMsg(t){$("pmMsg").textContent=t}
+function fillProfile(full){
+  put($("pmAv"),av(me,"xl"));$("pmUn").textContent=me.name;$("pmRm").hidden=!me.av;
+  if(full){$("pmDisp").value=me.display||"";$("pmBio").value=me.bio||"";$("delBox").hidden=true;pmMsg("");themeLabel();autoLabel();refreshPerm()}
+  renderMyExtras();
+}
+function renderStories(host,user,mine){
+  host.replaceChildren();
+  const items=storiesOf(user);
+  if(!items.length){host.append(el("div","empty",mine?"You have no active story yet.":"No active story."));return}
+  items.forEach(s=>{
+    const c=el("div","st"+(s.kind==="text"?" text":""));
+    if(s.file)c.append(mediaEl(s.file));
+    if(s.text)c.append(el("div",null,s.text));
+    const m=el("small");m.append(el("span",null,agoStory(s.at)));
+    if(mine){const b=el("button",null,"Delete");b.onclick=()=>{if(confirm("Delete this story?"))act("deleteStory",{id:s.id})};m.append(b)}
+    c.append(m);host.append(c);
+  });
+}
+function renderMyExtras(){
+  if(!me)return;
+  renderStories($("myStories"),me.name,true);
+  const showGrant=ADMIN_NAME&&!isAdminUser;
+  $("grantBox").hidden=!showGrant;
+  if(showGrant){$("grantChk").checked=myGrant;$("grantNote").textContent=myGrant?"The admin can call you without you accepting. While that call is on, you'll see an on-screen indicator, and you can revoke this anytime.":"Off by default. The admin must ring you like anyone else, and you choose whether to answer."}
+  $("bcBtn").textContent=broadcasting?"Stop broadcast":"Start broadcast";$("bcLocal").hidden=!broadcasting;
+}
+$("pmPick").onclick=()=>$("avFile").click();
+$("avFile").onchange=async e=>{
+  const f=e.target.files[0];e.target.value="";if(!f)return;
+  try{act("avatar",{data:await shrink(f,320,.85,true)});pmMsg("Photo updated.")}catch(err){pmMsg(err.message)}
+};
+$("pmRm").onclick=()=>{act("avatar",{data:null});pmMsg("Photo removed.")};
+$("pmSave").onclick=()=>{act("profile",{display:$("pmDisp").value,bio:$("pmBio").value});pmMsg("Profile saved.")};
+$("pwSave").onclick=()=>{
+  if($("pwNew").value.length<6){pmMsg("New password must be at least 6 characters.");return}
+  act("password",{old:$("pwOld").value,next:$("pwNew").value});
+};
+$("stFile").onclick=()=>$("stPick").click();
+$("stPick").onchange=async()=>{const f=$("stPick").files[0];$("stPick").value="";if(!f)return;const up=await upload(f);if(up)act("story",{fileId:up.id})};
+$("stPost").onclick=()=>{const t=$("stT").value.trim();if(t){act("story",{text:t});$("stT").value=""}};
+$("stT").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();$("stPost").click()}};
+$("grantChk").onchange=e=>{myGrant=e.target.checked;act("grantAdmin",{on:myGrant});renderMyExtras()};
+const themes=["auto","light","dark"];
+const getTheme=()=>{try{return localStorage.getItem("relay-theme")||"auto"}catch(_){return"auto"}};
+function themeLabel(){const t=getTheme();$("themeBtn").textContent="Theme: "+t[0].toUpperCase()+t.slice(1)}
+function applyTheme(){const t=getTheme();if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t}
+$("themeBtn").onclick=()=>{const t=themes[(themes.indexOf(getTheme())+1)%3];try{localStorage.setItem("relay-theme",t)}catch(_){}applyTheme();themeLabel()};
+applyTheme();
+$("logout").onclick=async()=>{await dropPush();resetSession(true)};
+$("delacct").onclick=()=>{$("delBox").hidden=false;$("delPw").focus()};
+$("delNo").onclick=()=>{$("delBox").hidden=true;$("delPw").value=""};
+$("delYes").onclick=()=>{act("deleteAccount",{password:$("delPw").value});$("delPw").value=""};
+function resetSession(revoke){
+  end(true);
+  if(broadcasting)stopBroadcast();
+  if(vPC){try{vPC.close()}catch(_){}vPC=null;vFrom=null;closeBroadcastViewer()}
+  if(ws){const s=ws;ws=null;s.onclose=null;s.onmessage=null;try{if(revoke&&session&&s.readyState===1)s.send(JSON.stringify({t:"logout",token:session.token}));s.close()}catch(_){}}
+  me=null;session=null;token="";cur=null;friends=[];incoming=[];outgoing=[];stories=[];log={};typingFrom={};authing=false;busy(false);auto=new Set();
+  isAdminUser=false;myGrant=false;ADMIN_NAME=null;adminState=null;$("adminBtn").hidden=true;$("admin").hidden=true;
+  try{localStorage.removeItem("relay-session")}catch(_){}
+  document.title="Relay Messenger";
+  $("pm").hidden=$("fm").hidden=true;$("app").classList.remove("chat");
+  $("lu").value="";$("lp").value="";$("err").textContent="";$("login").hidden=false;tab(false);
+  renderHead();renderList();renderChat();
+}
+
+/* ---------- friend profile ---------- */
+function fillFriend(){
+  const f=cur&&find(cur);if(!f){$("fm").hidden=true;return}
+  put($("fmAv"),av(f,"xl",true));$("fmName").textContent=dn(f);$("fmUn").textContent="@"+f.name;
+  $("fmStat").textContent=f.online?"Active now":ago(f.lastSeen);$("fmBio").textContent=f.bio||"";$("fmBio").hidden=!f.bio;
+  $("autoChk").checked=auto.has(f.name);
+  renderStories($("fmStories"),f.name,false);
+}
+$("autoChk").onchange=e=>{if(cur)setAuto(cur,e.target.checked)};
+$("reportBtn").onclick=()=>{
+  if(!cur)return;
+  const reason=prompt("What's going on with "+nameOf(cur)+"? (sent to the admin)");
+  if(reason===null)return;
+  act("report",{target:cur,reason:reason.trim()});
+};
+$("fmCall").onclick=()=>{$("fm").hidden=true;startCall()};
+$("fmRm").onclick=()=>{const f=find(cur);if(f&&confirm("Remove "+dn(f)+" from your friends? You won't be able to message or call each other. Old messages are kept in case you become friends again.")){$("fm").hidden=true;act("unfriend",{user:cur})}};
+document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>b.closest(".modal").hidden=true);
+document.querySelectorAll(".modal").forEach(m=>m.addEventListener("mousedown",e=>{if(e.target===m)m.hidden=true}));
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){document.querySelectorAll(".modal").forEach(m=>m.hidden=true);$("lb").hidden=true;$("emojis").hidden=true}});
+
+/* ---------- video calls (WebRTC; setup relayed through the server) ---------- */
+let pc=null,peer=null,stream=null,pending=null,iceQ=[];
+let callTimer=null,RING_MS=45000;
+let auto=new Set(); // friends whose calls are answered automatically (set after you accept one once, or from their profile)
+const autoKey=()=>"relay-auto-"+(me?me.name:"");
+function loadAuto(){try{auto=new Set(JSON.parse(localStorage.getItem(autoKey())||"[]"))}catch(_){auto=new Set()}}
+function saveAuto(){try{localStorage.setItem(autoKey(),JSON.stringify([...auto]))}catch(_){}}
+function setAuto(n,on){on?auto.add(n):auto.delete(n);saveAuto();if(!$("fm").hidden)$("autoChk").checked=auto.has(cur);updAuto()}
+const autoAllOn=()=>{try{return localStorage.getItem("relay-auto")==="1"}catch(_){return false}};
+function autoLabel(){const o=autoAllOn();$("autoBtn").textContent="Auto-answer all friends' calls: "+(o?"On":"Off");$("autoBtn").setAttribute("aria-pressed",o);$("autoHint").hidden=!o}
+$("autoBtn").onclick=()=>{try{localStorage.setItem("relay-auto",autoAllOn()?"0":"1")}catch(_){}autoLabel()};
+function updAuto(){const b=$("callAuto");b.hidden=!peer||peer===ADMIN_NAME;b.textContent=peer?"Auto-answer "+nameOf(peer)+": "+(auto.has(peer)?"on":"off"):""}
+let iceServers=[{urls:"stun:stun.l.google.com:19302"}];
+fetch("/ice-config").then(r=>r.json()).then(s=>{if(Array.isArray(s)&&s.length)iceServers=s}).catch(()=>{});
+const sig=(to,kind,data)=>ws&&ws.readyState===1&&ws.send(JSON.stringify({t:"signal",to,kind,data}));
+async function media(){
+  if(!navigator.mediaDevices)throw new Error("Camera access needs HTTPS or localhost.");
+  stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  $("lv").srcObject=stream;
+}
+function showCall(msg){
+  $("cstat").textContent=msg;$("call").hidden=false;$("mic").textContent="Mute";$("cam").textContent="Camera off";$("mic").className=$("cam").className="";
+  $("lv").hidden=false;$("mic").hidden=false;$("cam").hidden=false;$("stopShareBtn").hidden=true;$("hang").textContent="End call";
+  updAuto();updCallIndicator();
+}
+function updCallIndicator(){
+  const ind=$("callIndicator");
+  if(peer&&ADMIN_NAME&&peer===ADMIN_NAME){ind.hidden=false;ind.textContent="The admin is connected to this call"+(myGrant?" (you granted standing access — you can revoke it from your profile)":"")}
+  else ind.hidden=true;
+}
+function makePC(){
+  pc=new RTCPeerConnection({iceServers});
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  pc.onicecandidate=e=>e.candidate&&sig(peer,"ice",e.candidate);
+  pc.ontrack=e=>{$("rv").srcObject=e.streams[0];$("cstat").textContent=""};
+  pc.onconnectionstatechange=()=>{if(pc&&["failed","closed"].includes(pc.connectionState))end(false,"Call lost.")};
+}
+function flush(){iceQ.forEach(c=>pc.addIceCandidate(c).catch(()=>{}));iceQ=[]}
+async function startCall(target){
+  target=(typeof target==="string"&&target)||cur;
+  if(!target||pc||pending)return;
+  try{await media()}catch(e){alert(e.message&&e.message.includes("HTTPS")?e.message:"Allow camera and microphone access to start a call.");return}
+  peer=target;showCall("Calling "+nameOf(peer)+"…");makePC();
+  const o=await pc.createOffer();await pc.setLocalDescription(o);sig(peer,"offer",o);
+  clearTimeout(callTimer);callTimer=setTimeout(()=>{if(pc&&peer&&$("rv").srcObject==null)end(true,"No answer.")},RING_MS);
+}
+async function accept(isAuto){
+  const {from,data}=pending;$("incoming").hidden=true;
+  try{await media()}catch(e){sig(from,"reject");pending=null;iceQ=[];alert(e.message&&e.message.includes("HTTPS")?e.message:"Allow camera and microphone access to answer calls.");return}
+  pending=null;peer=from;if(find(from))setAuto(from,true);
+  showCall(isAuto?"Auto-answering "+nameOf(from)+"…":"Connecting…");makePC();
+  await pc.setRemoteDescription(data);flush();
+  const a=await pc.createAnswer();await pc.setLocalDescription(a);sig(peer,"answer",a);
+}
+function end(notify,msg){
+  clearTimeout(callTimer);
+  if(notify&&peer)sig(peer,"hangup");
+  if(pc){pc.onconnectionstatechange=null;pc.close()}
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  pc=null;stream=null;peer=null;iceQ=[];
+  $("lv").srcObject=null;if(!vFrom)$("rv").srcObject=null;$("callIndicator").hidden=true;
+  if(msg&&!$("call").hidden){$("cstat").textContent=msg;setTimeout(()=>{if(!pc&&!vFrom)$("call").hidden=true},1600)}else if(!vFrom)$("call").hidden=true;
+}
+function onSignal(d){
+  if(d.broadcast){onBroadcastSignal(d.from,d.kind,d.data);return}
+  const {from,kind,data}=d;
+  if(kind==="offer"){
+    if(pc||pending){sig(from,"busy");return}
+    pending={from,data};iceQ=[];
+    const f=find(from);
+    if((autoAllOn()&&f)||auto.has(from)||(d.admin&&myGrant)){accept(true);return}
+    $("caller").textContent=nameOf(from);put($("callerAv"),av(f||{name:from},"sm"));$("incoming").hidden=false;return;
+  }
+  if(kind==="ice"){
+    if(pc&&from===peer&&pc.remoteDescription)pc.addIceCandidate(data).catch(()=>{});
+    else if(from===peer||(pending&&pending.from===from))iceQ.push(data);
+    return;
+  }
+  if(pending&&pending.from===from&&kind==="hangup"){pending=null;iceQ=[];$("incoming").hidden=true;return}
+  if(from!==peer&&kind!=="unavailable")return;
+  const who=nameOf(from);
+  if(kind==="answer"&&pc)pc.setRemoteDescription(data).then(flush);
+  else if(kind==="ringing")$("cstat").textContent="Ringing "+who+"… (notification sent, waiting for them to open Relay)";
+  else if(kind==="reject")end(false,who+" declined.");
+  else if(kind==="busy")end(false,who+" is on another call.");
+  else if(kind==="unavailable")end(false,who+" is offline.");
+  else if(kind==="hangup")end(false,"Call ended.");
+}
+$("callBtn").onclick=()=>startCall();
+$("acc").onclick=()=>accept(false);
+$("callAuto").onclick=()=>{if(peer&&find(peer)){setAuto(peer,!auto.has(peer))}};
+$("dec").onclick=()=>{if(!pending)return;sig(pending.from,"reject");pending=null;iceQ=[];$("incoming").hidden=true};
+$("hang").onclick=()=>{if(vFrom){sig(vFrom,"hangup");try{vPC&&vPC.close()}catch(_){}vPC=null;vFrom=null;closeBroadcastViewer()}else end(true)};
+function toggle(btn,kind,on,off){const t=stream&&(kind==="a"?stream.getAudioTracks():stream.getVideoTracks())[0];if(!t)return;t.enabled=!t.enabled;btn.textContent=t.enabled?on:off;btn.className=t.enabled?"":"off"}
+$("mic").onclick=()=>toggle($("mic"),"a","Mute","Unmute");
+$("cam").onclick=()=>toggle($("cam"),"v","Camera off","Camera on");
+
+/* ---------- broadcast: I stream my camera one-way; only the admin can join and watch ---------- */
+let bPC=null,bStream=null,broadcasting=false; // my own broadcast, as the broadcaster
+let vPC=null,vFrom=null; // the admin's view of someone else's broadcast
+async function startBroadcast(){
+  if(broadcasting)return;
+  if(!navigator.mediaDevices){note("Camera access needs HTTPS or localhost.");return}
+  try{bStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true})}
+  catch(e){note("Allow camera and microphone to start a broadcast.");return}
+  broadcasting=true;act("broadcastStart");note("Broadcast started. The admin can join and watch; they can't start one on your camera.");
+  $("bcLocal").srcObject=bStream;renderMyExtras();
+}
+function stopBroadcast(){
+  if(!broadcasting)return;
+  broadcasting=false;act("broadcastStop");
+  if(bPC){bPC.onconnectionstatechange=null;bPC.close();bPC=null}
+  if(bStream){bStream.getTracks().forEach(t=>t.stop());bStream=null}
+  $("bcLocal").srcObject=null;renderMyExtras();
+}
+$("bcBtn").onclick=()=>broadcasting?stopBroadcast():startBroadcast();
+async function onBroadcastRequest(from){ // server told me (the broadcaster) that the admin wants to watch
+  if(!broadcasting||!bStream)return;
+  if(bPC){bPC.close();bPC=null}
+  bPC=new RTCPeerConnection({iceServers});
+  bStream.getTracks().forEach(t=>bPC.addTrack(t,bStream));
+  bPC.onicecandidate=e=>e.candidate&&sig(from,"ice",e.candidate);
+  bPC.onconnectionstatechange=()=>{if(bPC&&["failed","closed"].includes(bPC.connectionState)){bPC.close();bPC=null}};
+  const o=await bPC.createOffer();await bPC.setLocalDescription(o);sig(from,"offer",o);
+}
+function showBroadcastViewer(from){
+  vFrom=from;$("cstat").textContent="Watching "+nameOf(from)+"'s broadcast (read-only — you are not sending video)";
+  $("call").hidden=false;$("lv").hidden=true;$("mic").hidden=true;$("cam").hidden=true;$("callAuto").hidden=true;$("callIndicator").hidden=true;
+  $("stopShareBtn").hidden=false;$("hang").textContent="Leave";
+}
+function closeBroadcastViewer(){
+  $("rv").srcObject=null;$("lv").hidden=false;$("mic").hidden=false;$("cam").hidden=false;updAuto();
+  $("stopShareBtn").hidden=true;$("hang").textContent="End call";
+  if(!pc)$("call").hidden=true;
+}
+$("stopShareBtn").onclick=()=>{if(vFrom&&confirm("Stop "+nameOf(vFrom)+"'s broadcast? Their camera will turn off and they'll be told you ended it."))act("adminStopBroadcast",{user:vFrom})};
+function onBroadcastSignal(from,kind,data){
+  if(kind==="offer"){ // I'm the admin, receiving the broadcaster's stream
+    if(vPC){try{vPC.close()}catch(_){}}
+    vPC=new RTCPeerConnection({iceServers});
+    vPC.ontrack=e=>{$("rv").srcObject=e.streams[0]};
+    vPC.onicecandidate=e=>e.candidate&&sig(from,"ice",e.candidate);
+    vPC.onconnectionstatechange=()=>{if(vPC&&["failed","closed"].includes(vPC.connectionState)){vPC=null;vFrom=null;closeBroadcastViewer()}};
+    showBroadcastViewer(from);
+    vPC.setRemoteDescription(data).then(()=>vPC.createAnswer()).then(a=>vPC.setLocalDescription(a).then(()=>sig(from,"answer",a)));
+    return;
+  }
+  if(kind==="answer"&&bPC){bPC.setRemoteDescription(data);return}
+  if(kind==="ice"){const t=(bPC&&ADMIN_NAME&&from===ADMIN_NAME)?bPC:(vPC&&from===vFrom?vPC:null);if(t)t.addIceCandidate(data).catch(()=>{});return}
+  if(kind==="hangup"){
+    if(bPC&&ADMIN_NAME&&from===ADMIN_NAME){bPC.onconnectionstatechange=null;bPC.close();bPC=null;note("The admin left the broadcast.")}
+    if(vPC&&from===vFrom){vPC.onconnectionstatechange=null;vPC.close();vPC=null;vFrom=null;closeBroadcastViewer()}
+  }
+}
+
+/* ---------- admin dashboard ---------- */
+$("adminBtn").onclick=()=>{$("admin").hidden=false;act("adminState");renderAdmin()};
+function renderAdmin(){
+  if(!isAdminUser||$("admin").hidden||!adminState)return;
+  const row=(parent,html)=>{const r=el("div","arow");r.innerHTML=html;parent.append(r);return r};
+  const btn=(r,txt,fn,cls)=>{const b=el("button",cls||"",txt);b.onclick=fn;r.append(b)};
+  const none=(host,t)=>host.append(el("div","empty",t));
+  const U=$("aUsers");U.replaceChildren();
+  const others=adminState.users.filter(u=>u.name!==me.name);
+  if(!others.length)none(U,"No other users yet.");
+  others.forEach(u=>{
+    const r=row(U,'<span class="who">'+esc(u.display&&u.display!==u.name?u.display+" (@"+u.name+")":u.name)+'</span>'+
+      '<span class="chip '+(u.online?"on":"")+'">'+(u.online?"online":"offline")+'</span>'+
+      (u.granted?'<span class="chip on">admin-call granted</span>':'')+(u.banned?'<span class="chip off">banned</span>':''));
+    if(u.online&&u.granted&&!pc&&!pending)btn(r,"Call",()=>{$("admin").hidden=true;startCall(u.name)});
+    if(u.online)btn(r,"Kick",()=>act("adminKick",{user:u.name}));
+    if(u.banned)btn(r,"Unban",()=>act("adminUnban",{user:u.name}));
+    else btn(r,"Ban",()=>{if(confirm("Ban "+u.name+"? They won't be able to sign back in."))act("adminBan",{user:u.name})},"dng");
+  });
+  const R=$("aReports");R.replaceChildren();
+  const open=adminState.reports.filter(r=>r.status==="open");
+  if(!open.length)none(R,"No open reports.");
+  open.forEach(rp=>{
+    const r=row(R,'<span class="who"><b>'+esc(rp.target)+'</b> reported by '+esc(rp.from)+(rp.messageId?" (about a message)":"")+(rp.reason?": "+esc(rp.reason):"")+'<br><small style="color:var(--mute)">'+new Date(rp.at).toLocaleString()+'</small></span>');
+    btn(r,"Resolve",()=>act("adminResolveReport",{id:rp.id}));btn(r,"Dismiss",()=>act("adminDismissReport",{id:rp.id}));
+  });
+  const C=$("aCalls");C.replaceChildren();
+  if(!adminState.calls.length)none(C,"No active calls.");
+  adminState.calls.forEach(c=>row(C,'<span class="who">'+esc(c.a)+' &harr; '+esc(c.b)+'</span><span class="chip '+(c.state==="connected"?"on":"")+'">'+c.state+'</span><span class="chip">'+agoShort(c.since)+'</span>'));
+  const B=$("aBroadcasts");B.replaceChildren();
+  if(!adminState.broadcasts.length)none(B,"Nobody is broadcasting.");
+  adminState.broadcasts.forEach(b=>{
+    const r=row(B,'<span class="who">'+esc(b.user)+'</span><span class="chip">live '+agoShort(b.since)+'</span>');
+    const j=el("button",null,vFrom===b.user?"Watching":"Join");j.disabled=vFrom===b.user;j.onclick=()=>act("broadcastJoin",{from:b.user});r.append(j);
+    btn(r,"Stop share",()=>{if(confirm("Stop "+b.user+"'s broadcast? Their camera will turn off and they'll be told you ended it."))act("adminStopBroadcast",{user:b.user})},"dng");
+  });
+}
+setInterval(()=>{if(isAdminUser&&!$("admin").hidden)renderAdmin()},5000);
+
+/* ---------- camera/mic setup and call notifications ---------- */
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+const b64u8=s=>{const b=(s+"=".repeat((4-s.length%4)%4)).replace(/-/g,"+").replace(/_/g,"/"),r=atob(b);return Uint8Array.from(r,c=>c.charCodeAt(0))};
+async function permState(n){try{return (await navigator.permissions.query({name:n})).state}catch(_){return"unknown"}}
+async function getSub(){try{const r=await navigator.serviceWorker.getRegistration();return r?await r.pushManager.getSubscription():null}catch(_){return null}}
+async function refreshPerm(){
+  const [c,m]=await Promise.all([permState("camera"),permState("microphone")]);
+  const nt="Notification" in window?Notification.permission:"unsupported",on=!!(await getSub());
+  const w=s=>s==="granted"?"allowed":s==="denied"?"blocked":s==="prompt"?"not asked yet":s;
+  $("permInfo").textContent="Camera: "+w(c)+" · Microphone: "+w(m)+" · Call notifications: "+(on?"on":nt==="denied"?"blocked":"off");
+  $("pushBtn").textContent=on?"Turn off call notifications":"Turn on call notifications";
+}
+$("permBtn").onclick=async()=>{
+  if(!navigator.mediaDevices)return note("Camera access needs HTTPS or localhost.");
+  try{const s=await navigator.mediaDevices.getUserMedia({video:true,audio:true});s.getTracks().forEach(t=>t.stop());note("Camera and microphone allowed. If you chose Allow, calls on this device won't ask again.")}
+  catch(_){note("Camera or microphone was blocked. Allow them in your browser's site settings.")}
+  refreshPerm();
+};
+async function enablePush(quiet){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){if(!quiet)note("This browser can't show call notifications."+(isIOS?" On iPhone, tap Share, Add to Home Screen, then open Relay from there.":""));return false}
+  if(Notification.permission!=="granted"){
+    if(quiet)return false;
+    if(await Notification.requestPermission()!=="granted"){note("Notifications are blocked. Allow them in your browser's site settings.");return false}
+  }
+  try{
+    const reg=await navigator.serviceWorker.register("/sw.js");await navigator.serviceWorker.ready;
+    const {key}=await (await fetch("/push-key")).json(),want=b64u8(key);
+    let sub=await reg.pushManager.getSubscription();
+    if(sub){const have=sub.options&&sub.options.applicationServerKey;if(have&&new Uint8Array(have).join()!==want.join()){await sub.unsubscribe();sub=null}}
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:want});
+    act("pushSub",{sub:sub.toJSON()});if(!quiet)note("Call notifications are on for this device.");return true;
+  }catch(e){if(!quiet)note("Couldn't turn on call notifications ("+(e.message||"error")+").");return false}
+}
+const syncPush=()=>{enablePush(true)};
+async function dropPush(){const s=await getSub();if(s)act("pushUnsub",{endpoint:s.endpoint})}
+$("pushBtn").onclick=async()=>{
+  const s=await getSub();
+  if(s){act("pushUnsub",{endpoint:s.endpoint});await s.unsubscribe();note("Call notifications are off for this device.")}else await enablePush(false);
+  refreshPerm();
+};
+
+/* ---------- start ---------- */
+setInterval(()=>{if(me&&cur)renderHead()},60000); // refresh "active x min ago"
+if(session){authing=true;connect()}else{$("lu").focus()}
+</script>
+</body>
+</html>
