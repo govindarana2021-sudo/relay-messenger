@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0f766e">
+<title>Relay Admin</title>
+<link rel="icon" href="/icon.svg">
+<style>
+:root{--bg:#eef2f1;--panel:#fff;--ink:#16302b;--mute:#6b807b;--line:#d9e3e0;--me:#0f766e;--me-ink:#fff;--them:#e6efed;--accent:#f59e0b;--danger:#c2410c;--ok:#22c55e;box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1716;--panel:#14211f;--ink:#e3efec;--mute:#8aa39d;--line:#243532;--me:#14a396;--me-ink:#04201d;--them:#1d2e2b;--danger:#fb923c}}
+*{box-sizing:inherit}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Trebuchet MS","Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button,input{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--me)}
+.field{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;color:var(--ink)}
+.pri{border:0;background:var(--accent);color:#2b1a00;font-weight:700;border-radius:10px;padding:10px 14px;cursor:pointer}
+.pri:disabled{opacity:.6;cursor:default}
+.sec-btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:7px 12px;cursor:pointer}
+.sec-btn:hover{background:var(--them)}
+
+/* login */
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}
+#lf{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:26px 24px;display:flex;flex-direction:column;gap:12px;width:min(380px,100%)}
+.logo{width:56px;height:56px;border-radius:16px;background:var(--me);color:var(--me-ink);display:grid;place-items:center;font:700 26px Georgia,serif;align-self:center}
+#lf h1{margin:0;font:700 24px Georgia,serif;text-align:center}
+.sub{margin:0;text-align:center;color:var(--mute);font-size:14px}
+#lf form{display:flex;flex-direction:column;gap:10px}
+#lf label.l{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
+.chk{font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:center}
+#err{margin:0;color:var(--danger);min-height:1.2em;font-size:13px}
+.back{text-align:center;font-size:13px;margin:0}
+
+/* dashboard */
+#dash{max-width:900px;margin:0 auto;padding:16px}
+header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+header.top h1{margin:0;font:700 22px Georgia,serif;flex:1;min-width:160px}
+header.top .who{font-size:13px;color:var(--mute)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.stat b{display:block;font-size:24px;font-family:Georgia,serif}.stat span{font-size:12px;color:var(--mute)}
+section.box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+section.box h2{margin:0 0 6px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.empty{color:var(--mute);padding:8px 0;font-size:14px}
+.arow{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;flex-wrap:wrap}
+.arow:last-child{border-bottom:0}
+.arow .name{flex:1;min-width:140px;overflow-wrap:anywhere}
+.arow button{border:0;border-radius:12px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer;background:var(--them)}
+.arow button.dng{background:#dc2626;color:#fff}
+.arow button:disabled{opacity:.5;cursor:default}
+.chip{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--them);color:var(--mute)}
+.chip.on{background:var(--accent);color:#2b1a00}.chip.off{background:#dc2626;color:#fff}
+#toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:12px;font-size:13px;max-width:90vw}
+#viewer{position:fixed;inset:0;background:#05100e;z-index:20;display:flex;flex-direction:column}
+#viewer video{flex:1;min-height:0;width:100%;object-fit:contain;background:#05100e}
+#vstat{position:absolute;left:0;right:0;top:12px;text-align:center;color:#fff;font:700 16px Georgia,serif;text-shadow:0 1px 6px #000;pointer-events:none;padding:0 12px}
+#vctl{display:flex;justify-content:center;gap:10px;padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px))}
+#vctl button{border:0;border-radius:22px;padding:11px 18px;font-weight:700;cursor:pointer;background:#ffffff26;color:#fff}
+#vctl .dng{background:#dc2626}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div id="lf">
+    <div class="logo" aria-hidden="true">A</div>
+    <h1>Admin login</h1>
+    <p class="sub" id="lsub">Sign in with the admin account.</p>
+    <form id="fin">
+      <label class="l">Admin username<input class="field" id="lu" maxlength="20" autocomplete="username" autocapitalize="none" required></label>
+      <label class="l">Password<input class="field pw" id="lp" type="password" maxlength="100" autocomplete="current-password" required></label>
+      <button class="pri" id="lbtn">Log in</button>
+    </form>
+    <label class="chk"><input type="checkbox" id="showpw"> Show password</label>
+    <p id="err" role="alert"></p>
+    <p class="back"><a href="/">&larr; Back to Relay chat</a></p>
+  </div>
+</div>
+
+<div id="dash" hidden>
+  <header class="top">
+    <h1>Relay admin</h1>
+    <span class="who">Signed in as <b id="meName"></b></span>
+    <a class="sec-btn" href="/" style="text-decoration:none;color:inherit">Open chat app</a>
+    <button class="sec-btn" id="logout">Log out</button>
+  </header>
+  <div class="stats">
+    <div class="stat"><b id="sUsers">0</b><span>Users</span></div>
+    <div class="stat"><b id="sOnline">0</b><span>Online now</span></div>
+    <div class="stat"><b id="sReports">0</b><span>Open reports</span></div>
+    <div class="stat"><b id="sCalls">0</b><span>Active calls</span></div>
+    <div class="stat"><b id="sBc">0</b><span>Live broadcasts</span></div>
+  </div>
+  <section class="box"><h2>Users</h2><div id="aUsers"></div></section>
+  <section class="box"><h2>Reports</h2><div id="aReports"></div></section>
+  <section class="box"><h2>Active calls</h2><div id="aCalls"></div></section>
+  <section class="box"><h2>Live broadcasts</h2><div id="aBroadcasts"></div></section>
+  <p class="empty">Note: signing in here ends this account's session in the chat app, and the other way around (one live session per account).</p>
+</div>
+
+<div id="viewer" hidden>
+  <video id="rv" autoplay playsinline></video>
+  <div id="vstat"></div>
+  <div id="vctl"><button id="vleave">Leave</button><button id="vstop" class="dng">Stop share</button></div>
+</div>
+<div id="toast" hidden role="status"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e};
+const esc=s=>String(s).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+const agoShort=t=>{const s=Math.max(0,Math.floor((Date.now()-t)/1000));return s<60?s+"s":Math.floor(s/60)+"m "+(s%60)+"s"};
+const KEY="relay-admin-session";
+let ws=null,me=null,session=null,pendingAuth=null,authing=false,state=null,vPC=null,vFrom=null,iceServers=[{urls:"stun:stun.l.google.com:19302"}];
+try{session=JSON.parse(localStorage.getItem(KEY)||"null")}catch(_){}
+fetch("/ice-config").then(r=>r.json()).then(s=>{if(Array.isArray(s)&&s.length)iceServers=s}).catch(()=>{});
+fetch("/admin-status").then(r=>r.json()).then(s=>{if(!s.enabled){$("lsub").textContent="Admin is not enabled on this server. Set ADMIN_USERNAME and restart it.";$("lbtn").disabled=true}}).catch(()=>{});
+
+let toastT;function toast(t){const e=$("toast");e.textContent=t;e.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,5000)}
+const act=(t,x)=>ws&&ws.readyState===1&&ws.send(JSON.stringify(Object.assign({t},x)));
+const sig=(to,kind,data)=>act("signal",{to,kind,data});
+
+function connect(){
+  if(ws){ws.onclose=null;ws.onmessage=null;try{ws.close()}catch(_){}}
+  const s=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws=s;
+  s.onopen=()=>{
+    const first=pendingAuth;pendingAuth=null;
+    if(first)s.send(JSON.stringify(first));
+    else if(session)s.send(JSON.stringify({t:"resume",name:session.name,token:session.token,adminOnly:true}));
+  };
+  s.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch(_){return}handle(d)};
+  s.onclose=()=>{
+    closeViewer();
+    if(me){setTimeout(()=>{if(me&&ws===s)connect()},1500)}
+    else if(authing){authing=false;busy(false);$("err").textContent="Can't reach the server. Check your connection."}
+  };
+}
+function busy(b){$("lbtn").disabled=b}
+function handle(d){
+  if(d.t==="joined"){
+    if(!d.admin){signOut(false,"This account is not the admin.");return}
+    me=d.me;session={name:me.name,token:d.token};
+    try{localStorage.setItem(KEY,JSON.stringify(session))}catch(_){}
+    authing=false;busy(false);$("lp").value="";$("err").textContent="";
+    $("meName").textContent=me.name;$("login").hidden=true;$("dash").hidden=false;
+    return;
+  }
+  if(d.t==="authError"){
+    authing=false;busy(false);me=null;
+    if(d.expired){session=null;try{localStorage.removeItem(KEY)}catch(_){}}
+    $("err").textContent=d.expired?"":d.text;$("dash").hidden=true;$("login").hidden=false;return;
+  }
+  if(!me)return;
+  if(d.t==="adminState"){state=d;render()}
+  else if(d.t==="notice")toast(d.text);
+  else if(d.t==="kicked")signOut(false,"You signed in on another device or tab.");
+  else if(d.t==="signal"&&d.broadcast)onBroadcastSignal(d.from,d.kind,d.data);
+}
+function signOut(revoke,msg){
+  closeViewer();
+  if(ws){const s=ws;ws=null;s.onclose=null;s.onmessage=null;try{if(revoke&&session&&s.readyState===1)s.send(JSON.stringify({t:"logout",token:session.token}));s.close()}catch(_){}}
+  me=null;state=null;authing=false;busy(false);
+  if(revoke||msg){session=null;try{localStorage.removeItem(KEY)}catch(_){}}
+  $("dash").hidden=true;$("login").hidden=false;$("lp").value="";$("err").textContent=msg||"";
+}
+$("logout").onclick=()=>signOut(true);
+$("showpw").onchange=e=>$("lp").type=e.target.checked?"text":"password";
+$("fin").onsubmit=e=>{
+  e.preventDefault();$("err").textContent="";authing=true;busy(true);
+  pendingAuth={t:"login",name:$("lu").value.trim(),password:$("lp").value,adminOnly:true};connect();
+};
+
+/* ---------- dashboard ---------- */
+function render(){
+  if(!state||!me)return;
+  const others=state.users.filter(u=>u.name!==me.name),open=state.reports.filter(r=>r.status==="open");
+  $("sUsers").textContent=others.length;$("sOnline").textContent=others.filter(u=>u.online).length;
+  $("sReports").textContent=open.length;$("sCalls").textContent=state.calls.length;$("sBc").textContent=state.broadcasts.length;
+  const row=(host,html)=>{const r=el("div","arow");r.innerHTML=html;host.append(r);return r};
+  const btn=(r,txt,fn,cls)=>{const b=el("button",cls||"",txt);b.onclick=fn;r.append(b);return b};
+  const none=(host,t)=>host.append(el("div","empty",t));
+
+  const U=$("aUsers");U.replaceChildren();
+  if(!others.length)none(U,"No other users yet.");
+  others.forEach(u=>{
+    const label=u.display&&u.display!==u.name?esc(u.display)+" <small style='color:var(--mute)'>@"+esc(u.name)+"</small>":esc(u.name);
+    const r=row(U,'<span class="name">'+label+'</span><span class="chip '+(u.online?"on":"")+'">'+(u.online?"online":"offline")+'</span>'+
+      (u.granted?'<span class="chip on">admin-call granted</span>':'')+(u.banned?'<span class="chip off">banned</span>':''));
+    if(u.online)btn(r,"Kick",()=>act("adminKick",{user:u.name}));
+    if(u.banned)btn(r,"Unban",()=>act("adminUnban",{user:u.name}));
+    else btn(r,"Ban",()=>{if(confirm("Ban "+u.name+"? They won't be able to sign back in."))act("adminBan",{user:u.name})},"dng");
+  });
+
+  const R=$("aReports");R.replaceChildren();
+  if(!open.length)none(R,"No open reports.");
+  open.forEach(rp=>{
+    const r=row(R,'<span class="name"><b>'+esc(rp.target)+'</b> reported by '+esc(rp.from)+(rp.messageId?" (about a message)":"")+(rp.reason?": "+esc(rp.reason):"")+'<br><small style="color:var(--mute)">'+new Date(rp.at).toLocaleString()+'</small></span>');
+    btn(r,"Resolve",()=>act("adminResolveReport",{id:rp.id}));btn(r,"Dismiss",()=>act("adminDismissReport",{id:rp.id}));
+  });
+
+  const C=$("aCalls");C.replaceChildren();
+  if(!state.calls.length)none(C,"No active calls.");
+  state.calls.forEach(c=>row(C,'<span class="name">'+esc(c.a)+' &harr; '+esc(c.b)+'</span><span class="chip '+(c.state==="connected"?"on":"")+'">'+esc(c.state)+'</span><span class="chip">'+agoShort(c.since)+'</span>'));
+
+  const B=$("aBroadcasts");B.replaceChildren();
+  if(!state.broadcasts.length)none(B,"Nobody is broadcasting.");
+  state.broadcasts.forEach(b=>{
+    const r=row(B,'<span class="name">'+esc(b.user)+'</span><span class="chip">live '+agoShort(b.since)+'</span>');
+    const j=btn(r,vFrom===b.user?"Watching":"Watch",()=>act("broadcastJoin",{from:b.user}));j.disabled=vFrom===b.user;
+    btn(r,"Stop share",()=>{if(confirm("Stop "+b.user+"'s broadcast? Their camera will turn off and they'll be told you ended it."))act("adminStopBroadcast",{user:b.user})},"dng");
+  });
+}
+setInterval(render,5000);
+
+/* ---------- watching a broadcast (read-only: this page never sends video) ---------- */
+function openViewer(from){vFrom=from;$("vstat").textContent="Watching "+from+"'s broadcast (read-only, you are not sending video)";$("viewer").hidden=false;render()}
+function closeViewer(){
+  if(vPC){vPC.onconnectionstatechange=null;try{vPC.close()}catch(_){}vPC=null}
+  vFrom=null;$("rv").srcObject=null;$("viewer").hidden=true;if(me)render();
+}
+function onBroadcastSignal(from,kind,data){
+  if(kind==="offer"){
+    if(vPC){try{vPC.close()}catch(_){}}
+    vPC=new RTCPeerConnection({iceServers});
+    vPC.ontrack=e=>{$("rv").srcObject=e.streams[0]};
+    vPC.onicecandidate=e=>e.candidate&&sig(from,"ice",e.candidate);
+    vPC.onconnectionstatechange=()=>{if(vPC&&["failed","closed"].includes(vPC.connectionState))closeViewer()};
+    openViewer(from);
+    vPC.setRemoteDescription(data).then(()=>vPC.createAnswer()).then(a=>vPC.setLocalDescription(a).then(()=>sig(from,"answer",a)));
+    return;
+  }
+  if(kind==="ice"&&vPC&&from===vFrom){vPC.addIceCandidate(data).catch(()=>{});return}
+  if(kind==="hangup"&&from===vFrom){closeViewer();toast(from+"'s broadcast ended.")}
+}
+$("vleave").onclick=()=>{if(vFrom)sig(vFrom,"hangup");closeViewer()};
+$("vstop").onclick=()=>{if(vFrom&&confirm("Stop "+vFrom+"'s broadcast? Their camera will turn off and they'll be told you ended it."))act("adminStopBroadcast",{user:vFrom})};
+
+if(session){authing=true;connect()}else $("lu").focus();
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 @echo off
 cd /d "%~dp0"
 if exist turn-settings.bat call turn-settings.bat
+if exist admin-settings.bat call admin-settings.bat
 where cloudflared >nul 2>nul
 if errorlevel 1 (
   echo Installing the tunnel tool, one time only...

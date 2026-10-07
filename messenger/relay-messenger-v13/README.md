@@ -47,6 +47,23 @@ active calls and live broadcasts, plus kick / ban and delete-any-message. The ad
 someone without a prompt if that person opts in (Profile, "Allow the admin to call me anytime"),
 and can only watch a camera that the person chose to broadcast. Anyone can report a user or message.
 
+## How to get the Admin button
+There is no separate admin login. The admin is a normal account whose username matches `ADMIN_USERNAME`.
+1. **Windows:** open `admin-settings.bat`, change `admin` to the username you want (letters and numbers), save,
+   then run `start.bat` (or `start-online.bat`). **Other hosts:** set the `ADMIN_USERNAME` environment variable and restart.
+2. Read the server window: it says whether the admin account exists or must still be created.
+3. In the app click **Create account** and sign up with that username (or log in if it already exists).
+   Capitalization doesn't matter. If it exists, it's matched automatically.
+4. **Admin login page:** open `/admin` (for example http://localhost:3000/admin, or the "Admin login" link under the
+   normal login form) and sign in with the admin username and password. Only the admin account is accepted there;
+   anyone else is refused without being signed out of their chat. The page shows user counts, users (kick / ban /
+   unban), reports, active calls and live broadcasts (watch or stop them).
+5. The chat app also shows an **Admin** button after you log in as the admin, with the same dashboard plus calling
+   users who opted in. Deleting any message is done from the chat itself.
+Signing in on the admin page ends that account's chat session and vice versa (one live session per account).
+If you see no Admin button: the setting wasn't loaded (server window says "Admin dashboard is OFF"), or you are
+logged in as a different account.
+
 ## Usernames
 New usernames: letters and numbers only, 1 to 20 characters (case-insensitive unique). Older accounts
 with dots or underscores can still log in.
@@ -55,7 +72,7 @@ with dots or underscores can still log in.
 | Variable | Purpose |
 | --- | --- |
 | PORT | Port to listen on (default 3000) |
-| ADMIN_USERNAME | The single admin account. Create (or claim) that account yourself first. |
+| ADMIN_USERNAME | The single admin account (case-insensitive). On Windows set it in admin-settings.bat. Create that account yourself first. |
 | DATA_DIR | Where data.json, uploads and vapid.json live (point at a persistent disk) |
 | TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL | TURN server for video on strict networks |
 | VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT | Stable push keys (`npx web-push generate-vapid-keys`) |

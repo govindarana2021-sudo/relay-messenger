@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
+if exist admin-settings.bat call admin-settings.bat
 echo Installing (first run only)...
 call npm install
 echo.

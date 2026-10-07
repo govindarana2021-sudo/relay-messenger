@@ -15,7 +15,7 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // There is exactly one admin, fixed by the server operator via an env var (not by
 // any action a user can take in the app). Whoever signs in as this exact account
 // (with its password) gets admin powers; nobody can grant themselves or anyone else admin.
-const ADMIN_NAME = String(process.env.ADMIN_USERNAME || "").trim();
+let ADMIN_NAME = String(process.env.ADMIN_USERNAME || "").trim();
 const isAdmin = n => !!ADMIN_NAME && n === ADMIN_NAME;
 
 // ---------- tiny JSON "database" ----------
@@ -36,6 +36,7 @@ if (!db.friends) { // older data: people who already chatted become friends
 }
 // accounts made before passwords existed get an empty profile (no password yet: claimed on first login)
 db.users.forEach(n => { if (!db.profiles[n]) db.profiles[n] = { display: n, bio: "", av: 0, pass: null, tokens: [], lastSeen: 0 }; });
+if (ADMIN_NAME) { const hit = db.users.find(u => u.toLowerCase() === ADMIN_NAME.toLowerCase()); if (hit) ADMIN_NAME = hit; }
 const friendsOf = n => db.friends.filter(p => p.includes(n)).map(p => (p[0] === n ? p[1] : p[0]));
 const hasReq = (a, b) => db.requests.some(r => r.from === a && r.to === b);
 const dropReq = (a, b) => { db.requests = db.requests.filter(r => !(r.from === a && r.to === b)); };
@@ -136,6 +137,14 @@ const server = http.createServer((req, res) => {
   let url; try { url = decodeURIComponent(u.pathname); } catch { return res.writeHead(400).end(); }
   if (url === "/ice-config") { res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }); return res.end(JSON.stringify(iceConfig())); }
   if (url === "/health") return res.writeHead(200).end("ok");
+  if (url === "/admin-status") { res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }); return res.end(JSON.stringify({ enabled: !!ADMIN_NAME })); }
+  if (url === "/admin" || url === "/admin/") {
+    return fs.readFile(path.join(PUBLIC, "admin.html"), (err, data) => {
+      if (err) return res.writeHead(404).end("Not found");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff" });
+      res.end(data);
+    });
+  }
   if (url === "/push-key") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ key: vapid.publicKey })); }
   if (url.startsWith("/avatar/")) { const n = findUser(url.slice(8)); return n && db.profiles[n].av ? sendImage(res, avFile(n), "public, max-age=31536000, immutable") : res.writeHead(404).end(); }
 
@@ -298,7 +307,8 @@ wss.on("connection", (ws, req) => {
       try {
         const pw = String(d.password || "");
         if (d.t === "signup") {
-          const n = String(d.name || "").trim();
+          let n = String(d.name || "").trim();
+          if (ADMIN_NAME && n.toLowerCase() === ADMIN_NAME.toLowerCase()) n = ADMIN_NAME;
           if (!NAME_RE.test(n)) return authErr("Username can only contain letters and numbers (no spaces or symbols), up to 20 characters.");
           if (pw.length < 6 || pw.length > 100) return authErr("Password must be 6-100 characters.");
           if (findUser(n)) return authErr("That username is taken.");
@@ -315,6 +325,7 @@ wss.on("connection", (ws, req) => {
           const n = findUser(d.name), key = ip + "|" + String(d.name || "").toLowerCase();
           if (locked(key)) return authErr("Too many attempts. Wait a minute and try again.");
           const p = n && db.profiles[n];
+          if (d.adminOnly && !(p && isAdmin(n))) { noteFail(key); return authErr("Wrong username or password, or this is not the admin account."); }
           if (!p) { noteFail(key); return authErr("Wrong username or password."); }
           if (!p.pass) { // account from before passwords existed: the first password chosen claims it
             if (pw.length < 6 || pw.length > 100) return authErr("This account has no password yet. Enter a new password (6+ characters) to secure it.");
@@ -326,7 +337,7 @@ wss.on("connection", (ws, req) => {
         }
         // resume with a saved session token
         const n = findUser(d.name), p = n && db.profiles[n];
-        if (!p || !d.token || !(p.tokens || []).includes(sha(String(d.token)))) return authErr("Your session expired. Please log in again.", { expired: true });
+        if (!p || !d.token || (d.adminOnly && !isAdmin(n)) || !(p.tokens || []).includes(sha(String(d.token)))) return authErr("Your session expired. Please log in again.", { expired: true });
         return enter(ws, n, String(d.token));
       } finally { ws.busy = false; }
     }
@@ -589,5 +600,7 @@ wss.on("connection", (ws, req) => {
 
 server.listen(PORT, () => {
   console.log(`Relay running at http://localhost:${PORT}`);
-  console.log(ADMIN_NAME ? `Admin account: ${ADMIN_NAME}` : "No ADMIN_USERNAME set — admin dashboard is disabled.");
+  if (!ADMIN_NAME) console.log("Admin dashboard is OFF. To turn it on, set ADMIN_USERNAME (see README: Admin), restart, then sign up with that username.");
+  else if (db.profiles[ADMIN_NAME]) console.log(`Admin account: ${ADMIN_NAME} (exists - log in as it to see the Admin button)`);
+  else console.log(`Admin account: ${ADMIN_NAME} (NOT created yet - click "Create account" and sign up with exactly this username)`);
 });
